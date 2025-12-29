@@ -71,6 +71,7 @@ __marimo__/
 pc/server_id.txt
 pc/token.txt
 pc/shared_state.db
+pc/events.db
 
 # -------------------------------------------------------------
 # Android / mobile build artifacts

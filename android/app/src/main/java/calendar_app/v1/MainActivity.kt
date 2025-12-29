@@ -13,8 +13,8 @@ import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import calendar_app.v1.ui.SharedNumberScreen
-import calendar_app.v1.ui.SharedNumberViewModel
+import calendar_app.v1.ui.EventsScreen
+import calendar_app.v1.ui.EventsViewModel
 import calendar_app.v1.ui.theme.Calendar_app_v1Theme
 
 class MainActivity : ComponentActivity() {
@@ -28,16 +28,28 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             Calendar_app_v1Theme {
-                val viewModel: SharedNumberViewModel = viewModel()
-                val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-                SharedNumberScreen(
-                    state = uiState,
-                    onNumberChange = viewModel::updateNumberInput,
+                val viewModel: EventsViewModel = viewModel()
+                val state by viewModel.uiState.collectAsStateWithLifecycle()
+                EventsScreen(
+                    state = state,
+                    onTimelineOffsetChange = viewModel::updateTimelineOffset,
+                    onHorizonSelected = viewModel::selectHorizon,
+                    onSync = viewModel::syncNow,
+                    onOpenEditor = viewModel::openEditor,
+                    onMarkDone = viewModel::markDone,
+                    onDeleteEvent = viewModel::deleteEvent,
+                    onToggleSettings = viewModel::toggleSettings,
                     onTokenChange = viewModel::updateToken,
                     onManualHostChange = viewModel::updateManualHost,
                     onManualPortChange = viewModel::updateManualPort,
-                    onApplyLocal = viewModel::applyLocalUpdate,
-                    onSync = viewModel::syncNow
+                    onApplySettings = viewModel::useSettingsDefaults,
+                    onEditorNameChange = viewModel::updateEditorName,
+                    onEditorDueDateChange = viewModel::updateEditorDueDate,
+                    onEditorFrequencyValueChange = viewModel::updateEditorFrequencyValue,
+                    onEditorUnitChange = viewModel::updateEditorUnit,
+                    onSubmitEditor = viewModel::submitEditor,
+                    onCloseEditor = viewModel::closeEditor,
+                    onClearMessage = viewModel::clearMessages
                 )
             }
         }

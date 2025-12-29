@@ -102,8 +102,8 @@ class MdnsResolver(context: Context) {
     }
 
     companion object {
-        private const val SERVICE_TYPE = "_sharednum._tcp."
-        private const val SERVICE_TYPE_ROOT = "_sharednum._tcp"
+        private const val SERVICE_TYPE = "_recurringevents._tcp."
+        private const val SERVICE_TYPE_ROOT = "_recurringevents._tcp"
     }
 }
 

@@ -1,6 +1,6 @@
 # Recurring Events Calendar
 
-Prototype for a shared integer value that is synchronized between a PC FastAPI server+UI and an Android client over the same WLAN.
+Cross-platform playground for planning recurring chores and reminders. The PC side now provides a FastAPI backend plus a Tkinter dashboard that visualizes events on a configurable timeline. The Android client will be updated next to use the new API, but you can already explore the full PC experience.
 
 ## PC application (FastAPI + Tkinter)
 
@@ -16,47 +16,65 @@ cd pc
 python server.py
 ```
 
-On the first launch the server:
+On first launch the server:
 
-- Creates `shared_state.db` and seeds the shared record.
+- Creates `events.db` with `events` + `event_history` tables.
 - Generates `token.txt` with a random bearer token (printed to the console).
-- Generates `server_id.txt` (for mDNS/health responses).
+- Generates `server_id.txt` (used by health/mDNS).
 - Starts FastAPI on `0.0.0.0:8000`.
-- Advertises an mDNS service `_sharednum._tcp.local` so other devices discover it without hardcoded IPs.
+- Advertises an mDNS service `_recurringevents._tcp.local` so Android devices on the same WLAN can discover it.
 
-Allow inbound TCP 8000 on your computer's private-network firewall profile so Android devices on the same WLAN can reach the API.
+Keep TCP 8000 open on your private-network firewall profile so phones on the network can reach the API.
 
-### Running the PC UI
+### Running the timeline UI
 
-In a second terminal:
+In another terminal:
 
 ```bash
 cd pc
 python py_ui.py
 ```
 
-The Tkinter window shows the current number (read from `shared_state.db`), lets you enter a new integer, and has:
+Features:
 
-- **Apply locally** - updates the SQLite record with the current machine timestamp and `source_id="pc-ui"`. FastAPI immediately exposes that value via `/api/state`.
-- **Refresh** - re-reads the database so you can see changes pushed by Android.
+- **New** dialog to define an event name, first due date, and frequency (days/weeks/months/years).
+- Horizon selector (Day/Month/Year) that changes the overall span of the shared timeline.
+- Horizontal slider to move the visible time window while keeping the axis on top of the event rows.
+- Global axis row plus a per-event timeline that shows past completions (green dots) and upcoming due dates (blue/red markers for future/overdue occurrences).
+- Left-hand event cards (click to edit) showing the name, cadence, and current status, plus a “Mark done today” shortcut that resets the timer starting from the completion date.
+- Vertical slider to choose which rows are visible when you have more than six events.
 
-### Manual test workflow
+Events are sorted by the residual time to the next due date. Overdue rows remain highlighted until you mark them as complete, at which point the due date jumps forward according to the defined frequency.
 
-1. Start the server and note the printed token.
-2. Launch the PC UI, apply a local value (e.g., 10) and confirm it shows up.
-3. Configure the Android client with the mDNS-discovered host and token.
-4. From Android, sync to pull 10, change to (e.g.) 42 locally, then sync; observe that the PC UI refresh shows 42 after Android pushes.
-5. For negative tests, try an incorrect token (FastAPI returns HTTP 401) or turn the PC server off to see Android report discovery/fetch errors.
+### Manual walkthrough
+
+1. Start `server.py` and note the printed bearer token.
+2. Launch `py_ui.py`.
+3. Use **New Event** to add a few chores with different cadences.
+4. Drag the horizontal slider to inspect near-term vs long-term plans.
+5. Use the event cards to edit cadence or click **Mark done today** to advance a task, then watch the due marker jump ahead on the timeline.
+
+## HTTP API overview
+
+Authenticated with the printed bearer token (Authorization: `Bearer <token>`):
+
+- `GET /api/events?history_limit=5` — list events sorted by next due date (includes a limited history array for timeline markers).
+- `POST /api/events` — create a new event.
+- `GET /api/events/{id}` — fetch a single event plus optional history.
+- `PUT /api/events/{id}` — update name, due date, or frequency.
+- `DELETE /api/events/{id}` — remove an event (history deleted via cascade).
+- `POST /api/events/{id}/complete` — mark an event done (optional payload `{ "done_date": "YYYY-MM-DD" }`).
+- `GET /api/events/{id}/history?limit=50` — fetch the completion ledger.
+
+All timestamps are stored in UTC inside `events.db`, and the FastAPI service still exposes `/api/health` for readiness checks.
 
 ## Android app
 
-The `android/` module is a complete Android Studio project using Jetpack Compose + Room + OkHttp. The UI exposes:
+`android/` now ships a Compose client that mirrors the PC layout:
 
-- Token field (persisted) and device `source_id`.
-- Optional manual host/port fields to bypass mDNS (leave blank to auto-discover `_sharednum._tcp` services).
-- Local Room-backed value with **Apply locally** and **Sync now** buttons.
-- Connection status (resolved host:port/path), last sync time, last authoritative `source_id`, and surfaced errors.
+- **Settings gear** reveals the bearer token + optional host/port sheet so it never clutters the main timeline. Leave host blank to auto-discover `_recurringevents._tcp`.
+- **New / Sync / Horizon** controls mirror Tkinter. Horizontal and vertical sliders control the visible time window and event rows, keeping the shared axis at the top.
+- The cards/timeline rows stay aligned: tap a card to edit, use “Done today” to advance, or delete it. The right-hand canvas shows completions (green dots) and due markers (blue/red) just like the desktop build.
+- Every change immediately hits the FastAPI endpoints and then triggers a fresh `/api/events` sync, so the PC database stays authoritative.
 
-Sync uses `NsdManager` to discover `_sharednum._tcp`, then GETs/POSTs `/api/state` with the bearer token and Last-Write-Wins logic. When manual host/port is supplied, the app skips discovery and targets that endpoint directly.
-
-See `android/README.md` for build/run instructions, permission requirements (INTERNET, ACCESS_NETWORK_STATE, ACCESS_WIFI_STATE, CHANGE_WIFI_MULTICAST_STATE, NEARBY_WIFI_DEVICES), and the acceptance walkthrough.
+See `android/README.md` for build instructions, permissions, and the full walkthrough.
