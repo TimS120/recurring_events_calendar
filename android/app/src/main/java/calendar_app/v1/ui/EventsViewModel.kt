@@ -47,7 +47,8 @@ data class EventsScreenState(
     val endpointDescription: String? = null,
     val settings: SettingsUiState = SettingsUiState(),
     val showSettings: Boolean = false,
-    val editorState: EventEditorState? = null
+    val editorState: EventEditorState? = null,
+    val darkModeOverride: Boolean? = null
 ) {
     val horizon: TimelineHorizon
         get() = TimelineHorizons.getOrElse(horizonIndex.coerceIn(TimelineHorizons.indices)) { TimelineHorizons.first() }
@@ -274,6 +275,15 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
 
     fun clearMessages() {
         _uiState.update { it.copy(statusMessage = null, errorMessage = null) }
+    }
+
+    fun toggleDarkMode(systemDark: Boolean) {
+        _uiState.update { state ->
+            val baseline = state.darkModeOverride ?: systemDark
+            val target = !baseline
+            val newOverride = if (target == systemDark) null else target
+            state.copy(darkModeOverride = newOverride)
+        }
     }
 
     private fun manualEndpointOrNull(): MdnsEndpoint? {

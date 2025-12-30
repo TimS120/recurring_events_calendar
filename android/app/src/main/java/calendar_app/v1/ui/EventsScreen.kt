@@ -3,10 +3,15 @@
 package calendar_app.v1.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.AnimationState
+import androidx.compose.animation.core.animateDecay
+import androidx.compose.animation.core.exponentialDecay
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -24,6 +29,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -34,17 +41,20 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,8 +75,11 @@ import calendar_app.v1.model.addFrequency
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 
 private val DefaultRowHeight = 176.dp
 private val RowSpacing = 8.dp
@@ -75,6 +88,8 @@ private val AxisPadding = 36.dp
 @Composable
 fun EventsScreen(
     state: EventsScreenState,
+    isDarkTheme: Boolean,
+    isUsingSystemTheme: Boolean,
     onTimelineOffsetChange: (Int) -> Unit,
     onHorizonSelected: (Int) -> Unit,
     onSync: () -> Unit,
@@ -92,7 +107,8 @@ fun EventsScreen(
     onEditorUnitChange: (FrequencyUnit) -> Unit,
     onSubmitEditor: () -> Unit,
     onCloseEditor: () -> Unit,
-    onClearMessage: () -> Unit
+    onClearMessage: () -> Unit,
+    onToggleDarkMode: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState()
     if (state.showSettings) {
@@ -144,36 +160,34 @@ fun EventsScreen(
     ) {
         val availableWidth = this.maxWidth
         val scrollState = rememberScrollState()
+        var jumpToTodayNonce by remember { mutableIntStateOf(0) }
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(scrollState)
                 .padding(12.dp)
         ) {
-            TopBar(
+            HeaderSection(
                 state = state,
-                onHorizonSelected = onHorizonSelected,
+                isDarkTheme = isDarkTheme,
                 onNewEvent = { onOpenEditor(null) },
                 onSync = onSync,
-                onShowSettings = { onToggleSettings(true) }
+                onToggleDarkMode = onToggleDarkMode,
+                onShowSettings = { onToggleSettings(true) },
+                onHorizonSelected = onHorizonSelected,
+                onJumpToToday = {
+                    jumpToTodayNonce++
+                    onTimelineOffsetChange(0)
+                },
+                onTimelineOffsetChange = onTimelineOffsetChange
             )
-            Spacer(Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Drag the timeline to pan through time", style = MaterialTheme.typography.bodyMedium)
-                TextButton(onClick = { onTimelineOffsetChange(0) }) {
-                    Text("Today")
-                }
-            }
             Spacer(Modifier.height(12.dp))
         EventsTable(
             state = state,
             onOpenEditor = onOpenEditor,
             maxWidth = availableWidth,
-            onTimelineOffsetChange = onTimelineOffsetChange
+            onTimelineOffsetChange = onTimelineOffsetChange,
+            jumpToTodayTrigger = jumpToTodayNonce
         )
             Spacer(Modifier.height(12.dp))
             AnimatedVisibility(visible = state.statusMessage != null || state.errorMessage != null) {
@@ -201,34 +215,65 @@ fun EventsScreen(
 }
 
 @Composable
-private fun TopBar(
+private fun HeaderSection(
     state: EventsScreenState,
-    onHorizonSelected: (Int) -> Unit,
+    isDarkTheme: Boolean,
     onNewEvent: () -> Unit,
     onSync: () -> Unit,
-    onShowSettings: () -> Unit
+    onToggleDarkMode: () -> Unit,
+    onShowSettings: () -> Unit,
+    onHorizonSelected: (Int) -> Unit,
+    onJumpToToday: () -> Unit,
+    onTimelineOffsetChange: (Int) -> Unit
 ) {
     val expanded = remember { mutableStateOf(false) }
-    TopAppBar(
-        title = { Text("Recurring Events") },
-        actions = {
-            Button(onClick = onSync, enabled = !state.isSyncing) {
-                Text(if (state.isSyncing) "Syncing…" else "Sync now")
-            }
-            IconButton(onClick = onShowSettings) {
-                Icon(imageVector = Icons.Filled.Settings, contentDescription = "Settings")
-            }
-        },
-        navigationIcon = {
+    Text(
+        "Recurring Events",
+        style = MaterialTheme.typography.headlineSmall,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onBackground
+    )
+    Spacer(Modifier.height(8.dp))
+    val iconColor = MaterialTheme.colorScheme.onSurface
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Button(onClick = onNewEvent) {
                 Text("New")
             }
+            Button(onClick = onSync, enabled = !state.isSyncing) {
+                Text(if (state.isSyncing) "Syncing..." else "Sync now")
+            }
         }
-    )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            IconButton(
+                onClick = onToggleDarkMode,
+                colors = IconButtonDefaults.iconButtonColors(contentColor = iconColor)
+            ) {
+                val icon = if (isDarkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode
+                val description = if (isDarkTheme) "Switch to light mode" else "Switch to dark mode"
+                Icon(imageVector = icon, contentDescription = description, tint = iconColor)
+            }
+            IconButton(
+                onClick = onShowSettings,
+                colors = IconButtonDefaults.iconButtonColors(contentColor = iconColor)
+            ) {
+                Icon(imageVector = Icons.Filled.Settings, contentDescription = "Settings", tint = iconColor)
+            }
+        }
+    }
     Spacer(Modifier.height(8.dp))
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Horizon:", fontWeight = FontWeight.Medium)
-        Spacer(Modifier.width(8.dp))
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
         Box {
             Button(onClick = { expanded.value = true }) {
                 Text(state.horizon.label)
@@ -245,6 +290,9 @@ private fun TopBar(
                 }
             }
         }
+        TextButton(onClick = onJumpToToday) {
+            Text("Today")
+        }
     }
 }
 
@@ -253,7 +301,8 @@ private fun EventsTable(
     state: EventsScreenState,
     onOpenEditor: (RecurringEvent) -> Unit,
     maxWidth: Dp,
-    onTimelineOffsetChange: (Int) -> Unit
+    onTimelineOffsetChange: (Int) -> Unit,
+    jumpToTodayTrigger: Int
 ) {
     val viewStart = LocalDate.now().plusDays(state.timelineOffsetDays.toLong())
     val viewEnd = viewStart.plusDays(state.horizon.spanDays.toLong())
@@ -268,6 +317,60 @@ private fun EventsTable(
     val horizontalScroll = rememberScrollState()
     val sliderRange = state.horizon.sliderRange
     val density = LocalDensity.current
+    var timelineWidthPx by remember { mutableStateOf(1f) }
+    val coroutineScope = rememberCoroutineScope()
+    val decaySpec = remember { exponentialDecay<Float>() }
+    var flingJob by remember { mutableStateOf<Job?>(null) }
+    var accumulatedDays by remember { mutableStateOf(0f) }
+
+    fun stopFling() {
+        flingJob?.cancel()
+        flingJob = null
+    }
+
+    fun handleDragPixels(deltaPx: Float) {
+        if (timelineWidthPx <= 0f) return
+        if (deltaPx == 0f) return
+        val daysDelta = (deltaPx / timelineWidthPx) * state.horizon.spanDays
+        if (daysDelta == 0f) return
+        accumulatedDays += daysDelta
+        if (abs(accumulatedDays) < 0.1f) return
+        val steps = accumulatedDays.roundToInt()
+        if (steps == 0) return
+        val newValue = (state.timelineOffsetDays - steps).coerceIn(
+            sliderRange.first,
+            sliderRange.last
+        )
+        accumulatedDays -= steps
+        if (newValue != state.timelineOffsetDays) {
+            onTimelineOffsetChange(newValue)
+        }
+    }
+
+    fun startFling(velocity: Float) {
+        if (timelineWidthPx <= 0f) return
+        stopFling()
+        if (velocity == 0f) return
+        flingJob = coroutineScope.launch {
+            var lastValue = 0f
+            AnimationState(initialValue = 0f, initialVelocity = velocity).animateDecay(decaySpec) {
+                val delta = value - lastValue
+                handleDragPixels(delta)
+                lastValue = value
+                if (abs(velocity) < 0.01f) this.cancelAnimation()
+            }
+        }
+    }
+
+    val draggableState = rememberDraggableState { delta ->
+        stopFling()
+        handleDragPixels(delta)
+    }
+
+    LaunchedEffect(jumpToTodayTrigger) {
+        stopFling()
+        accumulatedDays = 0f
+    }
 
     @Composable
     fun EventList(modifier: Modifier) {
@@ -313,23 +416,17 @@ private fun EventsTable(
     ) {
         EventList(modifier = Modifier.widthIn(min = listWidth, max = listWidth))
         Spacer(Modifier.width(12.dp))
-        var timelineWidthPx by remember { mutableStateOf(1f) }
         Box(
             modifier = Modifier
                 .width(timelineWidth)
                 .fillMaxHeight()
                 .onSizeChanged { timelineWidthPx = it.width.toFloat().coerceAtLeast(1f) }
-                .pointerInput(state.horizon, state.timelineOffsetDays, timelineWidthPx) {
-                    detectHorizontalDragGestures { change, dragAmount ->
-                        change.consume()
-                        val daysDelta = (dragAmount / timelineWidthPx) * state.horizon.spanDays
-                        val newValue = (state.timelineOffsetDays - daysDelta.roundToInt()).coerceIn(
-                            sliderRange.first,
-                            sliderRange.last
-                        )
-                        onTimelineOffsetChange(newValue)
-                    }
-                }
+                .draggable(
+                    state = draggableState,
+                    orientation = Orientation.Horizontal,
+                    onDragStarted = { stopFling() },
+                    onDragStopped = { velocity -> startFling(velocity) }
+                )
         ) {
             TimelineCanvas(
                 events = visibleEvents,
@@ -400,6 +497,7 @@ private fun TimelineCanvas(
         val topPadding = AxisPadding.toPx()
         val width = size.width - leftPadding * 2
         val totalDays = max(1f, ChronoUnit.DAYS.between(viewStart, viewEnd).toFloat())
+        val spanDays = max(1, ChronoUnit.DAYS.between(viewStart, viewEnd).toInt())
 
         fun dateToX(date: LocalDate): Float {
             val delta = ChronoUnit.DAYS.between(viewStart, date).toFloat()
@@ -439,13 +537,25 @@ private fun TimelineCanvas(
             tickDate = tickDate.plusDays(tickStep)
         }
 
-        val todayX = dateToX(LocalDate.now())
-        drawLine(
-            color = Color(0xFFFF8800),
-            start = Offset(todayX, topPadding - 20),
-            end = Offset(todayX, size.height),
-            strokeWidth = 3f
-        )
+        val today = LocalDate.now()
+        if (!today.isBefore(viewStart) && !today.isAfter(viewEnd)) {
+            val todayX = dateToX(today)
+            drawLine(
+                color = Color(0xFFFF8800),
+                start = Offset(todayX, topPadding - 20),
+                end = Offset(todayX, size.height),
+                strokeWidth = 3f
+            )
+            val todayLabelPaint = android.graphics.Paint(labelPaint).apply {
+                textAlign = android.graphics.Paint.Align.LEFT
+            }
+            drawContext.canvas.nativeCanvas.drawText(
+                "Today",
+                todayX + 8f,
+                topPadding,
+                todayLabelPaint
+            )
+        }
 
         val rowStride = rowHeightPx + rowSpacingPx
         events.forEachIndexed { index, event ->
@@ -477,7 +587,9 @@ private fun TimelineCanvas(
 
             var markerDate = event.dueDate
             var iterations = 0
-            while (!markerDate.isAfter(viewEnd) && iterations < 12) {
+            val freqDays = estimatedFrequencyDays(event.frequencyValue, event.frequencyUnit)
+            val maxIterations = max(24, spanDays / freqDays + 24)
+            while (!markerDate.isAfter(viewEnd) && iterations < maxIterations) {
                 if (!markerDate.isBefore(viewStart)) {
                     val mx = dateToX(markerDate)
                     val overdue = markerDate.isBefore(LocalDate.now()) || markerDate == LocalDate.now()
@@ -618,4 +730,14 @@ private fun FrequencyDropdown(
             }
         }
     }
+}
+
+private fun estimatedFrequencyDays(value: Int, unit: FrequencyUnit): Int {
+    val base = when (unit) {
+        FrequencyUnit.DAYS -> 1
+        FrequencyUnit.WEEKS -> 7
+        FrequencyUnit.MONTHS -> 30
+        FrequencyUnit.YEARS -> 365
+    }
+    return (value * base).coerceAtLeast(1)
 }
