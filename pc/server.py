@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 import socket
+import threading
 import uuid
 from datetime import date, datetime
 from enum import Enum
@@ -50,6 +51,12 @@ zeroconf: Optional[Zeroconf] = None
 service_info: Optional[ServiceInfo] = None
 server_id: Optional[str] = None
 token_value: Optional[str] = None
+_mdns_enabled = True
+
+
+def set_mdns_enabled(value: bool) -> None:
+    global _mdns_enabled
+    _mdns_enabled = bool(value)
 
 
 class FrequencyUnit(str, Enum):
@@ -138,6 +145,8 @@ def get_local_ip() -> str:
 
 def register_mdns_service() -> None:
     global zeroconf, service_info
+    if not _mdns_enabled:
+        return
     try:
         zeroconf = Zeroconf(ip_version=IPVersion.V4Only)
         hostname = socket.gethostname()
@@ -170,6 +179,8 @@ def register_mdns_service() -> None:
 
 def unregister_mdns_service() -> None:
     global zeroconf, service_info
+    if not _mdns_enabled:
+        return
     if zeroconf:
         if service_info:
             zeroconf.unregister_service(service_info)
@@ -350,5 +361,41 @@ async def event_history_api(
     return [history_to_response(record) for record in history]
 
 
+def create_uvicorn_config(
+    *,
+    host: str = "0.0.0.0",
+    port: int = API_PORT,
+    log_level: str = "info",
+) -> uvicorn.Config:
+    return uvicorn.Config(app=app, host=host, port=port, log_level=log_level)
+
+
+def create_uvicorn_server(
+    *,
+    host: str = "0.0.0.0",
+    port: int = API_PORT,
+    log_level: str = "info",
+) -> uvicorn.Server:
+    return uvicorn.Server(create_uvicorn_config(host=host, port=port, log_level=log_level))
+
+
+def run_server(*, host: str = "0.0.0.0", port: int = API_PORT, log_level: str = "info") -> None:
+    uvicorn.run(app=app, host=host, port=port, log_level=log_level)
+
+
+def start_server_in_thread(
+    *,
+    host: str = "0.0.0.0",
+    port: int = API_PORT,
+    log_level: str = "info",
+    enable_mdns: bool = True,
+) -> tuple[uvicorn.Server, threading.Thread]:
+    set_mdns_enabled(enable_mdns)
+    server = create_uvicorn_server(host=host, port=port, log_level=log_level)
+    thread = threading.Thread(target=server.run, name="RecurringEventsServer", daemon=True)
+    thread.start()
+    return server, thread
+
+
 if __name__ == "__main__":
-    uvicorn.run("server:app", host="0.0.0.0", port=API_PORT)
+    run_server()

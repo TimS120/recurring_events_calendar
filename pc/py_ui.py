@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import atexit
 import ctypes
+import socket
 import subprocess
 import sys
+import time
 import tkinter as tk
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -10,7 +13,7 @@ from tkinter import messagebox, simpledialog, ttk
 from typing import Callable, List, Optional, Sequence, Tuple
 
 from event_store import (
-FREQUENCY_UNITS,
+    FREQUENCY_UNITS,
     EventRecord,
     HistoryRecord,
     add_frequency,
@@ -21,6 +24,7 @@ FREQUENCY_UNITS,
     mark_event_done,
     update_event,
 )
+from server import API_PORT as SERVER_API_PORT, start_server_in_thread
 
 
 @dataclass(frozen=True)
@@ -173,10 +177,73 @@ FREQUENCY_UNIT_DAY_MAP = {
     "years": 365,
 }
 
+SERVER_BIND_HOST = "0.0.0.0"
+SERVER_PROBE_HOST = "127.0.0.1"
+SERVER_START_TIMEOUT = 15.0
+
 
 def _estimate_frequency_days(value: int, unit: str) -> int:
     base = FREQUENCY_UNIT_DAY_MAP.get(unit.lower(), 30)
     return max(1, value * base)
+
+
+class EmbeddedServerController:
+    def __init__(
+        self,
+        *,
+        bind_host: str = SERVER_BIND_HOST,
+        probe_host: str = SERVER_PROBE_HOST,
+        port: int = SERVER_API_PORT,
+    ) -> None:
+        self.bind_host = bind_host
+        self.probe_host = probe_host
+        self.port = port
+        self._server = None
+        self._thread = None
+        self._exit_hook_registered = False
+
+    def start(self) -> None:
+        if self._is_listening():
+            return
+        server, thread = start_server_in_thread(
+            host=self.bind_host,
+            port=self.port,
+            log_level="warning",
+            enable_mdns=False,
+        )
+        self._server = server
+        self._thread = thread
+        if not self._exit_hook_registered:
+            atexit.register(self.stop)
+            self._exit_hook_registered = True
+        self._wait_until_ready()
+
+    def stop(self) -> None:
+        if not self._server:
+            return
+        self._server.should_exit = True
+        self._server.force_exit = True
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5)
+        self._server = None
+        self._thread = None
+
+    def _wait_until_ready(self) -> None:
+        deadline = time.time() + SERVER_START_TIMEOUT
+        while time.time() < deadline:
+            if self._is_listening():
+                return
+            if self._server and self._server.should_exit:
+                raise RuntimeError("Server stopped before finishing startup")
+            time.sleep(0.2)
+        raise TimeoutError(f"Timed out waiting for server to listen on {self.host}:{self.port}")
+
+    def _is_listening(self) -> bool:
+        try:
+            with socket.create_connection((self.probe_host, self.port), timeout=0.5):
+                return True
+        except OSError:
+            return False
 
 
 class EventDialog(simpledialog.Dialog):
@@ -544,10 +611,12 @@ class TimelineCanvas(tk.Canvas):
 class RecurringEventsUI:
     def __init__(self) -> None:
         initialize_database()
+        self.server_controller = EmbeddedServerController()
         self.root = tk.Tk()
         self.root.title("Recurring Events Calendar")
         self.root.geometry("1200x720")
         self.root.minsize(1000, 640)
+        self.root.protocol("WM_DELETE_WINDOW", self._handle_close_request)
 
         self.system_prefers_dark = detect_system_prefers_dark()
         self._manual_theme_override: Optional[str] = None
@@ -560,7 +629,7 @@ class RecurringEventsUI:
         self.timeline_offset_var = tk.IntVar(value=0)
         self.scroll_var = tk.DoubleVar(value=0.0)
         self.scroll_offset = 0.0
-        self.status_var = tk.StringVar(value="Ready")
+        self.status_var = tk.StringVar(value="Starting server...")
         self._suppress_scroll_callback = False
 
         self.events: List[Tuple[EventRecord, List[HistoryRecord]]] = []
@@ -569,7 +638,7 @@ class RecurringEventsUI:
         self._build_layout()
         self.apply_theme()
         self._bind_scroll_events()
-        self.refresh_events()
+        self._start_server_and_sync()
 
     @property
     def theme_mode(self) -> str:
@@ -727,6 +796,25 @@ class RecurringEventsUI:
         self.root.bind_all("<Button-4>", lambda event: self._on_mouse_wheel(event, delta_override=120))
         self.root.bind_all("<Button-5>", lambda event: self._on_mouse_wheel(event, delta_override=-120))
 
+    def _start_server_and_sync(self) -> None:
+        self.status_var.set("Starting local API server...")
+        self.root.update_idletasks()
+        try:
+            self.server_controller.start()
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Server start failed", f"Could not start the local API server:\n{exc}")
+            self.status_var.set("Server unavailable - showing last known data")
+            self.refresh_events()
+            return
+        self.status_var.set("Server online - syncing events")
+        self.refresh_events()
+
+    def _handle_close_request(self) -> None:
+        try:
+            self.server_controller.stop()
+        finally:
+            self.root.destroy()
+
     def _handle_list_viewport_change(self, height: int) -> None:
         if height <= 0:
             return
@@ -773,7 +861,7 @@ class RecurringEventsUI:
         self.events = data
         self._configure_scroll_slider()
         self.update_view()
-        self.status_var.set(f"{len(self.events)} event(s) • Refreshed at {datetime.now().strftime('%H:%M:%S')}")
+        self.status_var.set(f"{len(self.events)} event(s) - Refreshed at {datetime.now().strftime('%H:%M:%S')}")
 
     def _on_horizon_change(self) -> None:
         setting = HORIZON_SETTINGS[self.horizon_var.get()]
