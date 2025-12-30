@@ -68,7 +68,8 @@ import java.time.temporal.ChronoUnit
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-private val RowHeight = 84.dp
+private val DefaultRowHeight = 176.dp
+private val RowSpacing = 8.dp
 private val AxisPadding = 36.dp
 
 @Composable
@@ -121,7 +122,18 @@ fun EventsScreen(
             onUnitChange = onEditorUnitChange,
             onConfirm = onSubmitEditor,
             onDismiss = onCloseEditor,
-            onDelete = editor.id?.let { id -> { onDeleteEvent(id) } }
+            onDelete = editor.id?.let { id ->
+                {
+                    onDeleteEvent(id)
+                    onCloseEditor()
+                }
+            },
+            onMarkDone = editor.id?.let { id ->
+                {
+                    onMarkDone(id)
+                    onCloseEditor()
+                }
+            }
         )
     }
 
@@ -157,14 +169,12 @@ fun EventsScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
-            EventsTable(
-                state = state,
-                onOpenEditor = onOpenEditor,
-                onMarkDone = onMarkDone,
-                onDeleteEvent = onDeleteEvent,
-                maxWidth = availableWidth,
-                onTimelineOffsetChange = onTimelineOffsetChange
-            )
+        EventsTable(
+            state = state,
+            onOpenEditor = onOpenEditor,
+            maxWidth = availableWidth,
+            onTimelineOffsetChange = onTimelineOffsetChange
+        )
             Spacer(Modifier.height(12.dp))
             AnimatedVisibility(visible = state.statusMessage != null || state.errorMessage != null) {
                 val statusColor = if (state.errorMessage != null) Color(0xFFC53030) else Color(0xFF2F855A)
@@ -242,31 +252,46 @@ private fun TopBar(
 private fun EventsTable(
     state: EventsScreenState,
     onOpenEditor: (RecurringEvent) -> Unit,
-    onMarkDone: (Int) -> Unit,
-    onDeleteEvent: (Int) -> Unit,
     maxWidth: Dp,
     onTimelineOffsetChange: (Int) -> Unit
 ) {
     val viewStart = LocalDate.now().plusDays(state.timelineOffsetDays.toLong())
     val viewEnd = viewStart.plusDays(state.horizon.spanDays.toLong())
     val visibleEvents = state.visibleEvents
-    val rowsCount = visibleEvents.size.coerceAtLeast(1)
-    val timelineHeight = maxOf(RowHeight * rowsCount + AxisPadding, 220.dp)
+    val rowSpacing = RowSpacing
+    var rowHeight by remember { mutableStateOf(DefaultRowHeight) }
+    val rowsCount = visibleEvents.size
+    val totalRowsHeight = if (rowsCount > 0) (rowHeight + rowSpacing) * rowsCount else 0.dp
+    val timelineHeight = maxOf(totalRowsHeight + AxisPadding, 220.dp)
     val listWidth = 240.dp
     val timelineWidth = maxOf(maxWidth - listWidth - 24.dp, 300.dp)
     val horizontalScroll = rememberScrollState()
     val sliderRange = state.horizon.sliderRange
+    val density = LocalDensity.current
 
     @Composable
     fun EventList(modifier: Modifier) {
         Column(modifier = modifier) {
-            visibleEvents.forEach { event ->
+            if (visibleEvents.isNotEmpty()) {
+                Spacer(Modifier.height(AxisPadding))
+            }
+            visibleEvents.forEachIndexed { index, event ->
+                val measureModifier = if (index == 0) {
+                    Modifier.onSizeChanged { size ->
+                        val measuredHeight = with(density) { size.height.toDp() }
+                        if (measuredHeight > 0.dp && rowHeight != measuredHeight) {
+                            rowHeight = measuredHeight
+                        }
+                    }
+                } else {
+                    Modifier
+                }
                 EventCard(
                     event = event,
-                    onClick = { onOpenEditor(event) },
-                    onMarkDone = { onMarkDone(event.id) }
+                    modifier = measureModifier,
+                    onClick = { onOpenEditor(event) }
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(rowSpacing))
             }
             if (visibleEvents.isEmpty()) {
                 Box(
@@ -310,7 +335,9 @@ private fun EventsTable(
                 events = visibleEvents,
                 viewStart = viewStart,
                 viewEnd = viewEnd,
-                labelFormatter = state.horizon.tickFormatter
+                labelFormatter = state.horizon.tickFormatter,
+                rowHeight = rowHeight,
+                rowSpacing = rowSpacing
             )
         }
     }
@@ -320,10 +347,10 @@ private fun EventsTable(
 private fun EventCard(
     event: RecurringEvent,
     onClick: () -> Unit,
-    onMarkDone: () -> Unit
+    modifier: Modifier = Modifier
 ) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = if (event.isOverdue) Color(0xFFFFF1F0) else Color(0xFFF6F7FB))
@@ -337,8 +364,6 @@ private fun EventCard(
                 else -> "Next due ${event.dueDate}"
             }
             Text(dueStatus, color = if (event.isOverdue) Color(0xFFC53030) else Color(0xFF2F855A))
-            Spacer(Modifier.height(8.dp))
-            TextButton(onClick = onMarkDone) { Text("Done today") }
         }
     }
 }
@@ -348,7 +373,9 @@ private fun TimelineCanvas(
     events: List<RecurringEvent>,
     viewStart: LocalDate,
     viewEnd: LocalDate,
-    labelFormatter: DateTimeFormatter
+    labelFormatter: DateTimeFormatter,
+    rowHeight: Dp,
+    rowSpacing: Dp
 ) {
     if (events.isEmpty()) {
         Box(
@@ -362,6 +389,8 @@ private fun TimelineCanvas(
         return
     }
     val density = LocalDensity.current
+    val rowHeightPx = with(density) { rowHeight.toPx() }
+    val rowSpacingPx = with(density) { rowSpacing.toPx() }
     Canvas(
         modifier = Modifier
             .fillMaxSize()
@@ -369,7 +398,6 @@ private fun TimelineCanvas(
     ) {
         val leftPadding = 32.dp.toPx()
         val topPadding = AxisPadding.toPx()
-        val rowHeightPx = RowHeight.toPx()
         val width = size.width - leftPadding * 2
         val totalDays = max(1f, ChronoUnit.DAYS.between(viewStart, viewEnd).toFloat())
 
@@ -419,14 +447,15 @@ private fun TimelineCanvas(
             strokeWidth = 3f
         )
 
+        val rowStride = rowHeightPx + rowSpacingPx
         events.forEachIndexed { index, event ->
-            val rowTop = topPadding + index * rowHeightPx
-            val rowBottom = rowTop + rowHeightPx - 12f
+            val rowTop = topPadding + index * rowStride
+            val rowBottom = rowTop + rowHeightPx
             val midY = (rowTop + rowBottom) / 2f
             drawRect(
                 color = if (event.isOverdue) Color(0xFFFFE4E1) else Color(0xFFE8F0FF),
                 topLeft = Offset(leftPadding, rowTop),
-                size = androidx.compose.ui.geometry.Size(width, rowBottom - rowTop)
+                size = androidx.compose.ui.geometry.Size(width, rowHeightPx)
             )
             drawLine(
                 color = Color(0xFF4A5568),
@@ -514,7 +543,8 @@ private fun EventEditorDialog(
     onUnitChange: (FrequencyUnit) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    onDelete: (() -> Unit)?
+    onDelete: (() -> Unit)?,
+    onMarkDone: (() -> Unit)? = null
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -523,6 +553,9 @@ private fun EventEditorDialog(
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                onMarkDone?.let {
+                    TextButton(onClick = it) { Text("Done today") }
+                }
                 onDelete?.let {
                     TextButton(onClick = it) { Text("Delete") }
                 }

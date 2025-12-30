@@ -3,6 +3,8 @@ package calendar_app.v1.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import calendar_app.v1.data.EventsRepository
+import calendar_app.v1.data.local.RecurringEventsDatabase
 import calendar_app.v1.data.network.EventsApiClient
 import calendar_app.v1.data.network.MdnsEndpoint
 import calendar_app.v1.data.network.MdnsResolver
@@ -15,6 +17,7 @@ import calendar_app.v1.model.TimelineHorizons
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -60,6 +63,8 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
         resolver = MdnsResolver(application),
         httpClient = OkHttpClient()
     )
+    private val database = RecurringEventsDatabase.getInstance(application)
+    private val repository = EventsRepository(database, apiClient)
 
     private val _uiState = MutableStateFlow(
         EventsScreenState(
@@ -71,6 +76,16 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
         )
     )
     val uiState: StateFlow<EventsScreenState> = _uiState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            repository.eventsFlow.collectLatest { events ->
+                _uiState.update { state ->
+                    state.copy(events = events.sortedBy { it.dueDate })
+                }
+            }
+        }
+    }
 
     fun updateTimelineOffset(value: Int) {
         val range = uiState.value.horizon.sliderRange
@@ -161,74 +176,56 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
         }
         val manualEndpoint = manualEndpointOrNull()
         viewModelScope.launch {
-            _uiState.update { it.copy(isSyncing = true, errorMessage = null, statusMessage = "Looking for server...") }
-            try {
-                val bundle = apiClient.fetchEvents(token, manualEndpoint, historyLimit = DEFAULT_HISTORY_LIMIT)
-                val sorted = bundle.events.sortedBy { it.dueDate }
-                _uiState.update {
-                    it.copy(
-                        isSyncing = false,
-                        events = sorted,
-                        endpointDescription = "${bundle.endpoint.host}:${bundle.endpoint.port}",
-                        statusMessage = "Synchronized ${sorted.size} event(s).",
-                        errorMessage = null
-                    )
+            _uiState.update { it.copy(isSyncing = true, errorMessage = null, statusMessage = "Synchronizing...") }
+            when (val result = repository.sync(token, manualEndpoint, DEFAULT_HISTORY_LIMIT)) {
+                is EventsRepository.SyncResult.Success -> {
+                    val endpointDescription = "${result.endpoint.host}:${result.endpoint.port}"
+                    val message = "Synced ${result.remoteCount} event(s). Pushed ${result.pushedChanges} change(s)."
+                    _uiState.update {
+                        it.copy(
+                            isSyncing = false,
+                            endpointDescription = endpointDescription,
+                            statusMessage = message,
+                            errorMessage = null
+                        )
+                    }
                 }
-            } catch (ex: Exception) {
-                _uiState.update {
-                    it.copy(isSyncing = false, errorMessage = ex.humanMessage("Sync failed."), statusMessage = null)
+
+                is EventsRepository.SyncResult.Failure -> {
+                    _uiState.update {
+                        it.copy(isSyncing = false, errorMessage = result.error.humanMessage("Sync failed."), statusMessage = null)
+                    }
                 }
             }
         }
     }
 
     fun deleteEvent(eventId: Int) {
-        val token = uiState.value.settings.token.trim()
-        if (token.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "Token required to delete events.") }
-            return
-        }
-        val manualEndpoint = manualEndpointOrNull()
         viewModelScope.launch {
-            _uiState.update { it.copy(isSyncing = true, errorMessage = null, statusMessage = "Deleting event...") }
-            try {
-                apiClient.deleteEvent(token, manualEndpoint, eventId)
-                syncNow()
-            } catch (ex: Exception) {
-                _uiState.update {
-                    it.copy(isSyncing = false, errorMessage = ex.humanMessage("Delete failed."), statusMessage = null)
-                }
+            repository.deleteEventLocally(eventId)
+            _uiState.update {
+                it.copy(
+                    statusMessage = "Event deleted locally. Sync to propagate changes.",
+                    errorMessage = null
+                )
             }
         }
     }
 
     fun markDone(eventId: Int) {
-        val token = uiState.value.settings.token.trim()
-        if (token.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "Token required to mark events.") }
-            return
-        }
-        val manualEndpoint = manualEndpointOrNull()
         viewModelScope.launch {
-            _uiState.update { it.copy(isSyncing = true, statusMessage = "Marking event...", errorMessage = null) }
-            try {
-                apiClient.markDone(token, manualEndpoint, eventId)
-                syncNow()
-            } catch (ex: Exception) {
-                _uiState.update {
-                    it.copy(isSyncing = false, errorMessage = ex.humanMessage("Action failed."), statusMessage = null)
-                }
+            repository.markDoneLocally(eventId)
+            _uiState.update {
+                it.copy(
+                    statusMessage = "Marked as done locally. Run sync to push updates.",
+                    errorMessage = null
+                )
             }
         }
     }
 
     fun submitEditor() {
         val editor = uiState.value.editorState ?: return
-        val token = uiState.value.settings.token.trim()
-        if (token.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "Token required to save events.") }
-            return
-        }
         val name = editor.name.trim()
         if (name.isEmpty()) {
             _uiState.update { it.copy(errorMessage = "Event name required.") }
@@ -242,22 +239,21 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.update { it.copy(errorMessage = "Frequency must be a positive number.") }
             return
         }
-        val manualEndpoint = manualEndpointOrNull()
         viewModelScope.launch {
-            _uiState.update { it.copy(isSyncing = true, errorMessage = null, statusMessage = "Saving event...") }
-            try {
-                if (editor.id == null) {
-                    apiClient.createEvent(token, manualEndpoint, name, dueDate, freqValue, editor.frequencyUnit)
-                } else {
-                    apiClient.updateEvent(token, manualEndpoint, editor.id, name, dueDate, freqValue, editor.frequencyUnit)
-                }
-                _uiState.update { it.copy(editorState = null) }
-                syncNow()
-            } catch (ex: Exception) {
-                _uiState.update {
-                    it.copy(isSyncing = false, errorMessage = ex.humanMessage("Save failed."), statusMessage = null)
-                }
+            repository.saveEventLocally(
+                inputId = editor.id,
+                name = name,
+                dueDate = dueDate,
+                frequencyValue = freqValue,
+                frequencyUnit = editor.frequencyUnit,
+                generateLocalId = { prefs.nextLocalEventId() }
+            )
+            val status = if (editor.id == null) {
+                "Event saved locally. Sync to upload it."
+            } else {
+                "Event updated locally. Sync to push changes."
             }
+            _uiState.update { it.copy(editorState = null, statusMessage = status, errorMessage = null) }
         }
     }
 

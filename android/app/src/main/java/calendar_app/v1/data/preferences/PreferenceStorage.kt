@@ -36,10 +36,20 @@ class PreferenceStorage(context: Context) {
             prefs.edit().putInt(KEY_MANUAL_PORT, value).apply()
         }
 
+    fun nextLocalEventId(): Int {
+        val current = prefs.getInt(KEY_NEXT_LOCAL_EVENT_ID, -1)
+        val next = if (current >= 0) -1 else current
+        val assigned = next
+        val updated = assigned - 1
+        prefs.edit().putInt(KEY_NEXT_LOCAL_EVENT_ID, updated).apply()
+        return assigned
+    }
+
     companion object {
         private const val KEY_TOKEN = "token"
         private const val KEY_SOURCE_ID = "source_id"
         private const val KEY_MANUAL_HOST = "manual_host"
         private const val KEY_MANUAL_PORT = "manual_port"
+        private const val KEY_NEXT_LOCAL_EVENT_ID = "next_local_event_id"
     }
 }

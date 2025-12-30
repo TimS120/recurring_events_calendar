@@ -39,6 +39,7 @@ ROW_HEIGHT = 90
 ROW_BASE_OFFSET = 70
 LIST_BASE_OFFSET = 15
 DELETE_SENTINEL_KEY = "__delete__"
+MARK_DONE_SENTINEL_KEY = "__mark_done__"
 
 
 class EventDialog(simpledialog.Dialog):
@@ -104,6 +105,9 @@ class EventDialog(simpledialog.Dialog):
         box = ttk.Frame(self)
         save_btn = ttk.Button(box, text="Save", width=10, command=self.ok)
         save_btn.pack(side="left", padx=5, pady=5)
+        if self.event is not None:
+            done_btn = ttk.Button(box, text="Done today", width=12, command=self._mark_done)
+            done_btn.pack(side="left", padx=5, pady=5)
         cancel_btn = ttk.Button(box, text="Cancel", width=10, command=self.cancel)
         cancel_btn.pack(side="left", padx=5, pady=5)
         if self.event is not None:
@@ -121,18 +125,22 @@ class EventDialog(simpledialog.Dialog):
         self.result = {DELETE_SENTINEL_KEY: True}
         self.destroy()
 
+    def _mark_done(self) -> None:
+        if self.event is None:
+            return
+        self.result = {MARK_DONE_SENTINEL_KEY: True}
+        self.destroy()
+
 
 class EventListCanvas(tk.Canvas):
     def __init__(
         self,
         master: tk.Widget,
         on_edit: Callable[[int], None],
-        on_complete: Callable[[int], None],
     ) -> None:
         super().__init__(master, background="#f7f7f7", highlightthickness=0)
         self.events: List[Tuple[EventRecord, List[HistoryRecord]]] = []
         self.on_edit = on_edit
-        self.on_complete = on_complete
         self.scroll_offset = 0.0
         self.viewport_height = VISIBLE_ROWS * ROW_HEIGHT
         self.hit_regions: List[Tuple[str, int, float, float, float, float]] = []
@@ -156,8 +164,6 @@ class EventListCanvas(tk.Canvas):
             if x1 <= x <= x2 and y1 <= y <= y2:
                 if action == "edit":
                     self.on_edit(event_id)
-                elif action == "complete":
-                    self.on_complete(event_id)
                 break
 
     def redraw(self) -> None:
@@ -189,15 +195,6 @@ class EventListCanvas(tk.Canvas):
                 status_color = "#c53030"
             self.create_text(20, text_y + 40, text=status_text, anchor="nw", font=("Segoe UI", 9, "bold"), fill=status_color)
 
-            button_width = 120
-            button_height = 24
-            bx1 = width - button_width - 20
-            by1 = row_bottom - button_height - 10
-            bx2 = bx1 + button_width
-            by2 = by1 + button_height
-            self.create_rectangle(bx1, by1, bx2, by2, fill="#2563eb", outline="", tags="complete-btn")
-            self.create_text((bx1 + bx2) / 2, (by1 + by2) / 2, text="Mark done today", fill="#ffffff", font=("Segoe UI", 9, "bold"))
-            self.hit_regions.append(("complete", event.id, bx1, by1, bx2, by2))
             self.hit_regions.append(("edit", event.id, 10, row_top, width - 20, row_bottom))
 
 
@@ -371,7 +368,6 @@ class RecurringEventsUI:
         self.list_canvas = EventListCanvas(
             self.left_panel,
             on_edit=self._handle_edit_from_canvas,
-            on_complete=self.complete_event,
         )
         self.list_canvas.pack(fill="both", expand=True)
 
@@ -493,14 +489,18 @@ class RecurringEventsUI:
         dialog = EventDialog(self.root, f"Edit {event.name}", event)
         if dialog.result is None:
             return
-        if isinstance(dialog.result, dict) and dialog.result.get(DELETE_SENTINEL_KEY):
-            try:
-                delete_event(event.id)
-            except Exception as exc:  # noqa: BLE001
-                messagebox.showerror("Error", f"Failed to delete event: {exc}")
+        if isinstance(dialog.result, dict):
+            if dialog.result.get(DELETE_SENTINEL_KEY):
+                try:
+                    delete_event(event.id)
+                except Exception as exc:  # noqa: BLE001
+                    messagebox.showerror("Error", f"Failed to delete event: {exc}")
+                    return
+                self.refresh_events()
                 return
-            self.refresh_events()
-            return
+            if dialog.result.get(MARK_DONE_SENTINEL_KEY):
+                self.complete_event(event.id)
+                return
         try:
             update_event(
                 event.id,

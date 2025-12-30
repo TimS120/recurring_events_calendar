@@ -33,7 +33,7 @@ class EventsApiClient(
 
         httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw IllegalStateException("GET /events failed: ${response.code}")
+                throw ApiException(response.code, "GET /events failed")
             }
             val payload = response.body?.string().orEmpty()
             val events = JSONArray(payload).toRecurringEvents()
@@ -65,7 +65,7 @@ class EventsApiClient(
 
         httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw IllegalStateException("POST /events failed: ${response.code}")
+                throw ApiException(response.code, "POST /events failed")
             }
             lastEndpoint = endpoint
             return@withContext response.body?.string().orEmpty().toRecurringEvent()
@@ -96,7 +96,7 @@ class EventsApiClient(
 
         httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw IllegalStateException("PUT /events/$eventId failed: ${response.code}")
+                throw ApiException(response.code, "PUT /events/$eventId failed")
             }
             lastEndpoint = endpoint
             return@withContext response.body?.string().orEmpty().toRecurringEvent()
@@ -117,7 +117,7 @@ class EventsApiClient(
 
         httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw IllegalStateException("DELETE /events/$eventId failed: ${response.code}")
+                throw ApiException(response.code, "DELETE /events/$eventId failed")
             }
             lastEndpoint = endpoint
         }
@@ -137,7 +137,7 @@ class EventsApiClient(
 
         httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                throw IllegalStateException("POST /events/$eventId/complete failed: ${response.code}")
+                throw ApiException(response.code, "POST /events/$eventId/complete failed")
             }
             lastEndpoint = endpoint
             return@withContext response.body?.string().orEmpty().toRecurringEvent()
@@ -197,6 +197,8 @@ class EventsApiClient(
         val events: List<RecurringEvent>,
         val endpoint: MdnsEndpoint
     )
+
+    class ApiException(val code: Int, message: String) : Exception(message)
 
     companion object {
         private val JSON = "application/json; charset=utf-8".toMediaType()
