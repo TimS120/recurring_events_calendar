@@ -2,6 +2,7 @@
 
 package calendar_app.v1.ui
 
+import android.app.DatePickerDialog
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.AnimationState
 import androidx.compose.animation.core.animateDecay
@@ -30,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Settings
@@ -64,6 +66,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -514,10 +517,11 @@ private fun EventCard(
                 }
             }
             Text(secondaryLine, color = Color(0xFF4A5568))
+            val formattedDue = formatDisplayDate(event.dueDate)
             val dueStatus = when {
                 event.dueDate == LocalDate.now() -> "Due today"
-                event.dueDate.isBefore(LocalDate.now()) -> "Overdue since ${event.dueDate}"
-                else -> "Next due ${event.dueDate}"
+                event.dueDate.isBefore(LocalDate.now()) -> "Overdue since $formattedDue"
+                else -> "Next due $formattedDue"
             }
             Text(dueStatus, color = if (event.isOverdue) Color(0xFFC53030) else Color(0xFF2F855A))
         }
@@ -725,6 +729,22 @@ private fun EventEditorDialog(
     onDelete: (() -> Unit)?,
     onMarkDone: (() -> Unit)? = null
 ) {
+    val context = LocalContext.current
+    val pickDate = remember(context, editor.dueDate) {
+        {
+            val baseDate = parseDisplayDateOrNull(editor.dueDate) ?: LocalDate.now()
+            DatePickerDialog(
+                context,
+                { _, year, month, dayOfMonth ->
+                    val selected = LocalDate.of(year, month + 1, dayOfMonth)
+                    onDueDateChange(formatDisplayDate(selected))
+                },
+                baseDate.year,
+                baseDate.monthValue - 1,
+                baseDate.dayOfMonth
+            ).show()
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
@@ -758,8 +778,16 @@ private fun EventEditorDialog(
                 OutlinedTextField(
                     value = editor.dueDate,
                     onValueChange = onDueDateChange,
-                    label = { Text("Due date (YYYY-MM-DD)") },
-                    modifier = Modifier.fillMaxWidth()
+                    label = { Text("Due date (DD.MM.YYYY)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        IconButton(onClick = pickDate) {
+                            Icon(
+                                imageVector = Icons.Filled.CalendarMonth,
+                                contentDescription = "Pick date from calendar"
+                            )
+                        }
+                    }
                 )
                 OutlinedTextField(
                     value = editor.frequencyValue,

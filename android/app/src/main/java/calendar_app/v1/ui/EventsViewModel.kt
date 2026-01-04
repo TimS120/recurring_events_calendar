@@ -33,7 +33,7 @@ data class EventEditorState(
     val id: Int? = null,
     val name: String = "",
     val tag: String = "",
-    val dueDate: String = LocalDate.now().toString(),
+    val dueDate: String = formatDisplayDate(LocalDate.now()),
     val frequencyValue: String = "30",
     val frequencyUnit: FrequencyUnit = FrequencyUnit.DAYS
 )
@@ -166,7 +166,7 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
                 id = existing.id,
                 name = existing.name,
                 tag = existing.tag.orEmpty(),
-                dueDate = existing.dueDate.toString(),
+                dueDate = formatDisplayDate(existing.dueDate),
                 frequencyValue = existing.frequencyValue.toString(),
                 frequencyUnit = existing.frequencyUnit
             )
@@ -272,8 +272,8 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.update { it.copy(errorMessage = "Event name required.") }
             return
         }
-        val dueDate = runCatching { LocalDate.parse(editor.dueDate.trim()) }.getOrElse {
-            _uiState.update { it.copy(errorMessage = "Due date must be YYYY-MM-DD.") }
+        val dueDate = parseDisplayDateOrNull(editor.dueDate) ?: run {
+            _uiState.update { it.copy(errorMessage = "Due date must be DD.MM.YYYY.") }
             return
         }
         val freqValue = editor.frequencyValue.trim().toIntOrNull()?.takeIf { it > 0 } ?: run {
