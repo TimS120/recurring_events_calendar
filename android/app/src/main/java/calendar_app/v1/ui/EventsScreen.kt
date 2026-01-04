@@ -518,10 +518,19 @@ private fun EventCard(
             }
             Text(secondaryLine, color = Color(0xFF4A5568))
             val formattedDue = formatDisplayDate(event.dueDate)
+            val today = LocalDate.now()
             val dueStatus = when {
-                event.dueDate == LocalDate.now() -> "Due today"
-                event.dueDate.isBefore(LocalDate.now()) -> "Overdue since $formattedDue"
-                else -> "Next due $formattedDue"
+                event.dueDate == today -> "Due today"
+                event.dueDate.isBefore(today) -> {
+                    val base = "Overdue since $formattedDue"
+                    val pct = overduePercentage(event, today)
+                    if (pct != null) "$base (${pct}%)" else base
+                }
+                else -> {
+                    val base = "Next due $formattedDue"
+                    val pct = residualPercentage(event, today)
+                    if (pct != null) "$base (${pct}%)" else base
+                }
             }
             Text(dueStatus, color = if (event.isOverdue) Color(0xFFC53030) else Color(0xFF2F855A))
         }
@@ -906,4 +915,28 @@ private fun estimatedFrequencyDays(value: Int, unit: FrequencyUnit): Int {
         FrequencyUnit.YEARS -> 365
     }
     return (value * base).coerceAtLeast(1)
+}
+
+private fun eventCycleLengthDays(event: RecurringEvent): Int {
+    val due = event.dueDate
+    val start = event.lastDone?.takeIf { it.isBefore(due) }
+        ?: addFrequency(due, -event.frequencyValue, event.frequencyUnit)
+    val span = ChronoUnit.DAYS.between(start, due).toInt()
+    return if (span <= 0) estimatedFrequencyDays(event.frequencyValue, event.frequencyUnit) else span
+}
+
+private fun overduePercentage(event: RecurringEvent, today: LocalDate): Int? {
+    if (!event.dueDate.isBefore(today)) return null
+    val cycleDays = eventCycleLengthDays(event).coerceAtLeast(1)
+    val overdueDays = ChronoUnit.DAYS.between(event.dueDate, today).toDouble()
+    if (overdueDays <= 0) return 0
+    return ((overdueDays / cycleDays) * 100.0).roundToInt()
+}
+
+private fun residualPercentage(event: RecurringEvent, today: LocalDate): Int? {
+    if (!event.dueDate.isAfter(today)) return null
+    val cycleDays = eventCycleLengthDays(event).coerceAtLeast(1)
+    val remainingDays = ChronoUnit.DAYS.between(today, event.dueDate).toDouble()
+    val percent = ((remainingDays / cycleDays) * 100.0).coerceIn(0.0, 100.0)
+    return percent.roundToInt()
 }

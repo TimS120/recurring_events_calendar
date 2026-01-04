@@ -199,6 +199,38 @@ def parse_display_date(value: str) -> date:
     return datetime.strptime(value, DISPLAY_DATE_FMT).date()
 
 
+def _event_cycle_length_days(event: EventRecord) -> int:
+    end = event.due_date
+    start = event.last_done if event.last_done and event.last_done < end else add_frequency(
+        end, -event.frequency_value, event.frequency_unit
+    )
+    span = (end - start).days
+    if span <= 0:
+        span = max(1, _estimate_frequency_days(event.frequency_value, event.frequency_unit))
+    return span
+
+
+def _calculate_overdue_percentage(event: EventRecord, today: date) -> Optional[int]:
+    if event.due_date >= today:
+        return None
+    cycle_days = _event_cycle_length_days(event)
+    overdue_days = (today - event.due_date).days
+    if overdue_days <= 0:
+        return 0
+    percent = overdue_days / cycle_days * 100
+    return int(round(percent))
+
+
+def _calculate_residual_percentage(event: EventRecord, today: date) -> Optional[int]:
+    if event.due_date <= today:
+        return None
+    cycle_days = _event_cycle_length_days(event)
+    remaining_days = (event.due_date - today).days
+    percent = remaining_days / cycle_days * 100
+    percent = max(0.0, min(100.0, percent))
+    return int(round(percent))
+
+
 class EmbeddedServerController:
     def __init__(
         self,
@@ -871,14 +903,21 @@ class EventListCanvas(tk.Canvas):
                 fill=theme.text_secondary,
             )
 
-            status_text = f"Next due {format_display_date(event.due_date)}"
             status_color = theme.due_upcoming
             if event.due_date <= today:
                 if event.due_date == today:
                     status_text = "Due today"
                 else:
                     status_text = f"Overdue since {format_display_date(event.due_date)}"
+                    overdue_pct = _calculate_overdue_percentage(event, today)
+                    if overdue_pct is not None:
+                        status_text = f"{status_text} ({overdue_pct}%)"
                 status_color = theme.due_overdue
+            else:
+                status_text = f"Next due {format_display_date(event.due_date)}"
+                residual_pct = _calculate_residual_percentage(event, today)
+                if residual_pct is not None:
+                    status_text = f"{status_text} ({residual_pct}%)"
             self.create_text(
                 20,
                 text_y + 40,
