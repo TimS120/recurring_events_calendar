@@ -169,6 +169,7 @@ ROW_BASE_OFFSET = 70
 LIST_BASE_OFFSET = 42
 DELETE_SENTINEL_KEY = "__delete__"
 MARK_DONE_SENTINEL_KEY = "__mark_done__"
+TAG_PRIORITY_ALL = "All tags"
 
 FREQUENCY_UNIT_DAY_MAP = {
     "days": 1,
@@ -253,31 +254,56 @@ class EventDialog(simpledialog.Dialog):
         title: str,
         event: Optional[EventRecord] = None,
         theme_provider: Optional[Callable[[], ThemePalette]] = None,
+        tag_options: Optional[Sequence[str]] = None,
     ) -> None:
         self.event = event
         self.result_data: Optional[dict] = None
         self.theme_provider = theme_provider
+        self._tag_options = sorted(
+            {option.strip() for option in (tag_options or []) if option and option.strip()},
+            key=str.casefold,
+        )
+        self._tag_popup: Optional[tk.Toplevel] = None
+        self._tag_popup_listbox: Optional[tk.Listbox] = None
         super().__init__(master, title)
 
     def body(self, master: tk.Widget) -> tk.Widget:
         self._apply_theme(master)
-        ttk.Label(master, text="Event name").grid(row=0, column=0, sticky="w", pady=(0, 4))
+        row = 0
+        ttk.Label(master, text="Event name").grid(row=row, column=0, sticky="w", pady=(0, 4))
+        row += 1
         self.name_var = tk.StringVar(value=self.event.name if self.event else "")
-        ttk.Entry(master, textvariable=self.name_var, width=30).grid(row=1, column=0, columnspan=2, sticky="we", pady=(0, 8))
+        ttk.Entry(master, textvariable=self.name_var, width=30).grid(row=row, column=0, columnspan=2, sticky="we", pady=(0, 8))
+        row += 1
 
-        ttk.Label(master, text="Next due date (YYYY-MM-DD)").grid(row=2, column=0, sticky="w")
+        ttk.Label(master, text="Tag (optional)").grid(row=row, column=0, sticky="w")
+        row += 1
+        tag_value = self.event.tag if (self.event and self.event.tag) else ""
+        self.tag_var = tk.StringVar(value=tag_value)
+        tag_values = list(self._tag_options)
+        if tag_value and tag_value not in tag_values:
+            tag_values.append(tag_value)
+        self.tag_input = ttk.Combobox(master, textvariable=self.tag_var, values=tag_values, width=30)
+        self.tag_input.grid(row=row, column=0, columnspan=2, sticky="we", pady=(0, 8))
+        self._setup_tag_autocomplete()
+        row += 1
+
+        ttk.Label(master, text="Next due date (YYYY-MM-DD)").grid(row=row, column=0, sticky="w")
+        row += 1
         default_due = self.event.due_date if self.event else date.today()
         self.due_var = tk.StringVar(value=default_due.isoformat())
-        ttk.Entry(master, textvariable=self.due_var, width=20).grid(row=3, column=0, sticky="w", pady=(0, 8))
+        ttk.Entry(master, textvariable=self.due_var, width=20).grid(row=row, column=0, sticky="w", pady=(0, 8))
+        row += 1
 
-        ttk.Label(master, text="Frequency").grid(row=4, column=0, sticky="w")
+        ttk.Label(master, text="Frequency").grid(row=row, column=0, sticky="w")
+        row += 1
         self.freq_value_var = tk.StringVar(value=str(self.event.frequency_value if self.event else 30))
         freq_spin = ttk.Spinbox(master, from_=1, to=3650, textvariable=self.freq_value_var, width=6)
-        freq_spin.grid(row=5, column=0, sticky="w")
+        freq_spin.grid(row=row, column=0, sticky="w")
 
         unit_label = self.event.frequency_unit if self.event else FREQUENCY_UNITS[0]
         self.freq_unit_var = tk.StringVar(value=unit_label)
-        ttk.OptionMenu(master, self.freq_unit_var, unit_label, *FREQUENCY_UNITS).grid(row=5, column=1, sticky="w", padx=(6, 0))
+        ttk.OptionMenu(master, self.freq_unit_var, unit_label, *FREQUENCY_UNITS).grid(row=row, column=1, sticky="w", padx=(6, 0))
 
         return master
 
@@ -302,8 +328,13 @@ class EventDialog(simpledialog.Dialog):
         if unit not in FREQUENCY_UNITS:
             messagebox.showerror("Invalid data", "Please choose a valid frequency unit.")
             return False
+        tag_text = self.tag_var.get().strip()
+        if len(tag_text) > 64:
+            messagebox.showerror("Invalid data", "Tags must be 64 characters or fewer.")
+            return False
         self.result_data = {
             "name": name,
+            "tag": tag_text,
             "due_date": due_date,
             "frequency_value": freq_value,
             "frequency_unit": unit,
@@ -342,6 +373,132 @@ class EventDialog(simpledialog.Dialog):
             return
         self.result = {MARK_DONE_SENTINEL_KEY: True}
         self.destroy()
+        self._hide_tag_popup()
+
+    def _setup_tag_autocomplete(self) -> None:
+        if not hasattr(self, "tag_input"):
+            return
+        tag_values = [value for value in self.tag_input.cget("values") if value]
+        cached_options = sorted({value.strip() for value in tag_values if value.strip()}, key=str.casefold)
+
+        def filter_options(prefix: str) -> List[str]:
+            if not prefix:
+                return []
+            lowered = prefix.casefold()
+            return [value for value in cached_options if value.casefold().startswith(lowered)]
+
+        def update_suggestions() -> List[str]:
+            text = self.tag_var.get().strip()
+            matches = filter_options(text)
+            return matches
+
+        def handle_key(_event: tk.Event) -> None:
+            matches = update_suggestions()
+            self._show_tag_popup(matches)
+
+        def handle_focus(_event: tk.Event) -> None:
+            matches = update_suggestions()
+            self._show_tag_popup(matches)
+
+        def handle_selection(_event: tk.Event) -> None:
+            current = self.tag_input.get()
+            self.tag_var.set(current)
+            self.tag_input.icursor("end")
+            self._hide_tag_popup()
+
+        self.tag_input.bind("<KeyRelease>", handle_key, add="+")
+        self.tag_input.bind("<FocusIn>", handle_focus, add="+")
+        self.tag_input.bind("<<ComboboxSelected>>", handle_selection, add="+")
+        self.tag_input.bind("<FocusOut>", self._handle_tag_input_focus_out, add="+")
+        self.tag_input.bind("<Down>", self._focus_tag_popup, add="+")
+
+    def _show_tag_popup(self, options: Sequence[str]) -> None:
+        self._hide_tag_popup()
+        values = [value for value in options if value]
+        current = self.tag_var.get().strip()
+        if not values:
+            return
+        if current and len(values) == 1 and values[0].casefold() == current.casefold():
+            return
+        popup = tk.Toplevel(self)
+        popup.wm_overrideredirect(True)
+        popup.attributes("-topmost", True)
+        theme = self.theme_provider() if self.theme_provider is not None else LIGHT_THEME
+        bg = theme.surface
+        fg = theme.text_primary
+        frame = tk.Frame(popup, bg=bg, highlightthickness=1, highlightbackground=theme.text_secondary)
+        frame.pack(fill="both", expand=True)
+        listbox = tk.Listbox(
+            frame,
+            activestyle="none",
+            selectmode="browse",
+            bg=bg,
+            fg=fg,
+            highlightthickness=0,
+            relief="flat",
+        )
+        for value in values:
+            listbox.insert("end", value)
+        listbox.pack(fill="both", expand=True)
+        listbox.bind("<ButtonRelease-1>", lambda _e: self._select_tag_from_popup())
+        listbox.bind("<Return>", lambda _e: self._select_tag_from_popup())
+        listbox.bind("<Escape>", lambda _e: self._hide_tag_popup())
+        listbox.bind("<FocusOut>", lambda _e: self.after_idle(self._hide_tag_popup))
+        self._tag_popup = popup
+        self._tag_popup_listbox = listbox
+        self.after_idle(lambda: self._position_tag_popup())
+
+    def _position_tag_popup(self) -> None:
+        if not self._tag_popup or not self.tag_input:
+            return
+        try:
+            x = self.tag_input.winfo_rootx()
+            y = self.tag_input.winfo_rooty() + self.tag_input.winfo_height()
+            width = self.tag_input.winfo_width()
+        except tk.TclError:
+            self._hide_tag_popup()
+            return
+        height = min(160, len(self._tag_popup_listbox.get(0, "end")) * 22 + 4) if self._tag_popup_listbox else 120
+        self._tag_popup.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _hide_tag_popup(self) -> None:
+        if self._tag_popup_listbox:
+            try:
+                self._tag_popup_listbox.destroy()
+            except tk.TclError:
+                pass
+        self._tag_popup_listbox = None
+        if self._tag_popup:
+            try:
+                self._tag_popup.destroy()
+            except tk.TclError:
+                pass
+        self._tag_popup = None
+
+    def _select_tag_from_popup(self) -> None:
+        if not self._tag_popup_listbox:
+            return
+        selection = self._tag_popup_listbox.curselection()
+        if selection:
+            value = self._tag_popup_listbox.get(selection[0])
+            self.tag_var.set(value)
+            self.tag_input.focus_set()
+            self.tag_input.icursor("end")
+        self._hide_tag_popup()
+
+    def _focus_tag_popup(self, _event: Optional[tk.Event] = None) -> str | None:
+        if self._tag_popup_listbox:
+            self._tag_popup_listbox.focus_set()
+            if not self._tag_popup_listbox.curselection():
+                self._tag_popup_listbox.selection_set(0)
+            return "break"
+        return None
+
+    def _handle_tag_input_focus_out(self, _event: tk.Event) -> None:
+        next_widget = self.focus_get()
+        if self._tag_popup_listbox and next_widget is self._tag_popup_listbox:
+            return
+        self.after_idle(self._hide_tag_popup)
 
     def _apply_theme(self, body_frame: tk.Widget) -> None:
         if self.theme_provider is None:
@@ -441,6 +598,8 @@ class EventListCanvas(tk.Canvas):
                 fill=theme.text_primary,
             )
             freq_text = f"Every {event.frequency_value} {event.frequency_unit}"
+            if event.tag:
+                freq_text = f"{freq_text} | Tag: {event.tag}"
             self.create_text(
                 20,
                 text_y + 20,
@@ -453,7 +612,10 @@ class EventListCanvas(tk.Canvas):
             status_text = f"Next due {event.due_date.strftime('%b %d, %Y')}"
             status_color = theme.due_upcoming
             if event.due_date <= today:
-                status_text = "Due today" if event.due_date == today else "Overdue"
+                if event.due_date == today:
+                    status_text = "Due today"
+                else:
+                    status_text = f"Overdue since {event.due_date.strftime('%b %d, %Y')}"
                 status_color = theme.due_overdue
             self.create_text(
                 20,
@@ -548,17 +710,11 @@ class TimelineCanvas(tk.Canvas):
             )
             tick_date += timedelta(days=tick_step)
 
-        today_x = date_to_x(today)
-        if self.view_start <= today <= self.view_end and margin <= today_x <= width - margin:
-            self.create_line(today_x, axis_y, today_x, height, dash=(4, 4), fill=theme.today_color)
-            self.create_text(
-                today_x + 4,
-                axis_y + 12,
-                text="Today",
-                anchor="w",
-                font=("Segoe UI", 8),
-                fill=theme.today_color,
-            )
+        today_line_x: Optional[float] = None
+        if self.view_start <= today <= self.view_end:
+            candidate_x = date_to_x(today)
+            if margin <= candidate_x <= width - margin:
+                today_line_x = candidate_x
 
         if not self.events:
             self.create_text(
@@ -607,6 +763,17 @@ class TimelineCanvas(tk.Canvas):
                 due_marker = add_frequency(due_marker, event.frequency_value, event.frequency_unit)
                 iterations += 1
 
+        if today_line_x is not None:
+            self.create_line(today_line_x, axis_y, today_line_x, height, dash=(4, 4), fill=theme.today_color, width=2)
+            self.create_text(
+                today_line_x + 4,
+                axis_y + 12,
+                text="Today",
+                anchor="w",
+                font=("Segoe UI", 8),
+                fill=theme.today_color,
+            )
+
 
 class RecurringEventsUI:
     def __init__(self) -> None:
@@ -629,10 +796,13 @@ class RecurringEventsUI:
         self.timeline_offset_var = tk.IntVar(value=0)
         self.scroll_var = tk.DoubleVar(value=0.0)
         self.scroll_offset = 0.0
+        self.tag_priority_var = tk.StringVar(value=TAG_PRIORITY_ALL)
         self.status_var = tk.StringVar(value="Starting server...")
         self._suppress_scroll_callback = False
 
         self.events: List[Tuple[EventRecord, List[HistoryRecord]]] = []
+        self._available_tags: List[str] = []
+        self._display_events: List[Tuple[EventRecord, List[HistoryRecord]]] = []
         self.viewport_height = VISIBLE_ROWS * ROW_HEIGHT
 
         self._build_layout()
@@ -679,7 +849,18 @@ class RecurringEventsUI:
         self.style.map("TEntry", fieldbackground=[("disabled", theme.panel_surface)])
         for style_name in ("TCombobox", "TSpinbox"):
             self.style.configure(style_name, fieldbackground=entry_bg, foreground=entry_fg, background=entry_bg)
+            self.style.map(
+                style_name,
+                fieldbackground=[("readonly", entry_bg)],
+                foreground=[("disabled", theme.text_secondary)],
+                background=[("readonly", entry_bg)],
+            )
         self.style.configure("TCombobox", arrowcolor=entry_fg)
+        try:
+            self.root.option_add("*TCombobox*Listbox.background", entry_bg)
+            self.root.option_add("*TCombobox*Listbox.foreground", entry_fg)
+        except tk.TclError:
+            pass
 
         if hasattr(self, "theme_toggle_btn"):
             self.theme_toggle_btn.config(text=self._theme_button_text())
@@ -737,6 +918,11 @@ class RecurringEventsUI:
         )
         horizon_menu.pack(side="left", padx=(6, 0))
         ttk.Button(top_slider_row, text="Jump to today", command=self.reset_timeline_slider).pack(side="right")
+        tag_row = ttk.Frame(slider_frame)
+        tag_row.pack(fill="x", pady=(4, 2))
+        ttk.Label(tag_row, text="Prioritize tag:").pack(side="left")
+        self.tag_filter_menu = ttk.OptionMenu(tag_row, self.tag_priority_var, self.tag_priority_var.get())
+        self.tag_filter_menu.pack(side="left", padx=(6, 0))
         self.timeline_slider = tk.Scale(
             slider_frame,
             from_=HORIZON_SETTINGS["Day"].slider_min,
@@ -789,6 +975,53 @@ class RecurringEventsUI:
         status_frame.pack(fill="x", padx=12, pady=(0, 12))
         self.status_label = ttk.Label(status_frame, textvariable=self.status_var, style="Status.TLabel")
         self.status_label.pack(anchor="w")
+        self._update_tag_menu()
+
+    def _update_tag_menu(self) -> None:
+        if not hasattr(self, "tag_filter_menu"):
+            return
+        tag_map: dict[str, str] = {}
+        for event, _history in self.events:
+            value = (event.tag or "").strip() if event.tag else ""
+            if not value:
+                continue
+            key = value.casefold()
+            if key not in tag_map:
+                tag_map[key] = value
+        self._available_tags = sorted(tag_map.values(), key=str.casefold)
+        options = [TAG_PRIORITY_ALL] + self._available_tags
+        if self.tag_priority_var.get() not in options:
+            self.tag_priority_var.set(TAG_PRIORITY_ALL)
+        menu = self.tag_filter_menu["menu"]
+        menu.delete(0, "end")
+        for option in options:
+            menu.add_command(
+                label=option,
+                command=lambda value=option: self._select_tag_option(value),
+            )
+
+    def _select_tag_option(self, value: str) -> None:
+        self.tag_priority_var.set(value)
+        self.update_view()
+
+    def _apply_tag_priority(
+        self, events: Sequence[Tuple[EventRecord, List[HistoryRecord]]]
+    ) -> List[Tuple[EventRecord, List[HistoryRecord]]]:
+        if not events:
+            return []
+        selected = self.tag_priority_var.get().strip()
+        if not selected or selected == TAG_PRIORITY_ALL:
+            return list(events)
+        normalized = selected.casefold()
+        prioritized: List[Tuple[EventRecord, List[HistoryRecord]]] = []
+        remainder: List[Tuple[EventRecord, List[HistoryRecord]]] = []
+        for item in events:
+            tag_value = (item[0].tag or "").strip()
+            if tag_value and tag_value.casefold() == normalized:
+                prioritized.append(item)
+            else:
+                remainder.append(item)
+        return prioritized + remainder
 
     def _bind_scroll_events(self) -> None:
         self.root.bind_all("<MouseWheel>", self._on_mouse_wheel)
@@ -842,7 +1075,12 @@ class RecurringEventsUI:
             self._set_scroll_offset(self.scroll_offset + offset_change)
 
     def add_event(self) -> None:
-        dialog = EventDialog(self.root, "New Event", theme_provider=self.current_theme)
+        dialog = EventDialog(
+            self.root,
+            "New Event",
+            theme_provider=self.current_theme,
+            tag_options=self._available_tags,
+        )
         if dialog.result is None:
             return
         try:
@@ -859,8 +1097,9 @@ class RecurringEventsUI:
             messagebox.showerror("Error", f"Failed to read events: {exc}")
             return
         self.events = data
-        self._configure_scroll_slider()
+        self._update_tag_menu()
         self.update_view()
+        self._configure_scroll_slider()
         self.status_var.set(f"{len(self.events)} event(s) - Refreshed at {datetime.now().strftime('%H:%M:%S')}")
 
     def _on_horizon_change(self) -> None:
@@ -874,7 +1113,8 @@ class RecurringEventsUI:
 
     def _configure_scroll_slider(self) -> None:
         extra_padding = ROW_HEIGHT
-        total_height = max(0, len(self.events) * ROW_HEIGHT + LIST_BASE_OFFSET + extra_padding)
+        events_for_layout = self._display_events if self._display_events else self.events
+        total_height = max(0, len(events_for_layout) * ROW_HEIGHT + LIST_BASE_OFFSET + extra_padding)
         viewport = self.viewport_height
         max_offset = max(0, total_height - viewport)
         self.row_slider.config(to=max_offset)
@@ -891,11 +1131,13 @@ class RecurringEventsUI:
     def update_view(self) -> None:
         if not self.horizon_var.get():
             return
+        display_events = self._apply_tag_priority(self.events)
+        self._display_events = display_events
         setting = HORIZON_SETTINGS[self.horizon_var.get()]
         view_start = date.today() + timedelta(days=int(self.timeline_offset_var.get()))
         view_end = view_start + timedelta(days=setting.span_days)
         self.timeline_canvas.update_view(
-            self.events,
+            display_events,
             view_start,
             view_end,
             self.horizon_var.get(),
@@ -903,13 +1145,19 @@ class RecurringEventsUI:
             self.scroll_offset,
             self.viewport_height,
         )
-        self.list_canvas.update_view(self.events, self.scroll_offset, self.viewport_height)
+        self.list_canvas.update_view(display_events, self.scroll_offset, self.viewport_height)
 
     def _handle_edit_from_canvas(self, event_id: int) -> None:
         event = next((evt for evt, _history in self.events if evt.id == event_id), None)
         if event is None:
             return
-        dialog = EventDialog(self.root, f"Edit {event.name}", event, theme_provider=self.current_theme)
+        dialog = EventDialog(
+            self.root,
+            f"Edit {event.name}",
+            event,
+            theme_provider=self.current_theme,
+            tag_options=self._available_tags,
+        )
         if dialog.result is None:
             return
         if isinstance(dialog.result, dict):
@@ -928,6 +1176,7 @@ class RecurringEventsUI:
             update_event(
                 event.id,
                 name=dialog.result["name"],
+                tag=dialog.result["tag"],
                 due_date=dialog.result["due_date"],
                 frequency_value=dialog.result["frequency_value"],
                 frequency_unit=dialog.result["frequency_unit"],

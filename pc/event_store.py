@@ -28,6 +28,7 @@ def _connect(db_path: Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
 class EventRecord:
     id: int
     name: str
+    tag: Optional[str]
     frequency_value: int
     frequency_unit: str
     due_date: date
@@ -87,6 +88,7 @@ def _row_to_event(row: sqlite3.Row) -> EventRecord:
     return EventRecord(
         id=row["id"],
         name=row["name"],
+        tag=row["tag"] if "tag" in row.keys() else None,
         frequency_value=row["frequency_value"],
         frequency_unit=row["frequency_unit"],
         due_date=_parse_required_date(row["due_date"]),
@@ -115,6 +117,7 @@ def initialize_database(db_path: Path = DEFAULT_DB_PATH) -> None:
             CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
+                tag TEXT,
                 frequency_value INTEGER NOT NULL CHECK (frequency_value > 0),
                 frequency_unit TEXT NOT NULL CHECK (
                     frequency_unit IN ('days','weeks','months','years')
@@ -138,6 +141,9 @@ def initialize_database(db_path: Path = DEFAULT_DB_PATH) -> None:
                 ON event_history(event_id, action_date DESC);
             """
         )
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(events)")}
+        if "tag" not in columns:
+            conn.execute("ALTER TABLE events ADD COLUMN tag TEXT")
         conn.commit()
 
 
@@ -175,7 +181,7 @@ def list_events(db_path: Path = DEFAULT_DB_PATH) -> List[EventRecord]:
     with _db_lock, _connect(db_path) as conn:
         rows = conn.execute(
             """
-            SELECT id, name, frequency_value, frequency_unit, due_date,
+            SELECT id, name, tag, frequency_value, frequency_unit, due_date,
                    last_done, created_at, updated_at
             FROM events
             ORDER BY due_date ASC, name COLLATE NOCASE ASC
@@ -188,7 +194,7 @@ def get_event(event_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[EventR
     with _db_lock, _connect(db_path) as conn:
         row = conn.execute(
             """
-            SELECT id, name, frequency_value, frequency_unit, due_date,
+            SELECT id, name, tag, frequency_value, frequency_unit, due_date,
                    last_done, created_at, updated_at
             FROM events
             WHERE id = ?
@@ -200,6 +206,7 @@ def get_event(event_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[EventR
 
 def create_event(
     name: str,
+    tag: Optional[str],
     due_date: date,
     frequency_value: int,
     frequency_unit: str,
@@ -212,13 +219,14 @@ def create_event(
         cur = conn.execute(
             """
             INSERT INTO events (
-                name, frequency_value, frequency_unit, due_date,
+                name, tag, frequency_value, frequency_unit, due_date,
                 last_done, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 name.strip(),
+                tag.strip() if tag and tag.strip() else None,
                 frequency_value,
                 frequency_unit,
                 due_date.strftime(DATE_FMT),
@@ -239,6 +247,7 @@ def update_event(
     event_id: int,
     *,
     name: Optional[str] = None,
+    tag: Optional[str] = None,
     due_date: Optional[date] = None,
     frequency_value: Optional[int] = None,
     frequency_unit: Optional[str] = None,
@@ -253,6 +262,10 @@ def update_event(
     if name is not None:
         fields.append("name = ?")
         values.append(name.strip())
+    if tag is not None:
+        fields.append("tag = ?")
+        cleaned = tag.strip()
+        values.append(cleaned if cleaned else None)
     if due_date is not None:
         fields.append("due_date = ?")
         values.append(due_date.strftime(DATE_FMT))

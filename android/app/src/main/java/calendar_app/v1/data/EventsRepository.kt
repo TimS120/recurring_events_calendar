@@ -40,6 +40,7 @@ class EventsRepository(
     suspend fun saveEventLocally(
         inputId: Int?,
         name: String,
+        tag: String?,
         dueDate: LocalDate,
         frequencyValue: Int,
         frequencyUnit: FrequencyUnit,
@@ -47,8 +48,10 @@ class EventsRepository(
     ) = withContext(Dispatchers.IO) {
         val eventId = inputId ?: generateLocalId()
         val now = System.currentTimeMillis()
+        val normalizedTag = tag?.trim()?.takeIf { it.isNotEmpty() }
         val entity = eventDao.getEventById(eventId)?.copy(
             name = name,
+            tag = normalizedTag,
             dueDate = dueDate,
             frequencyValue = frequencyValue,
             frequencyUnit = frequencyUnit.apiValue,
@@ -59,6 +62,7 @@ class EventsRepository(
         ) ?: EventEntity(
             id = eventId,
             name = name,
+            tag = normalizedTag,
             frequencyValue = frequencyValue,
             frequencyUnit = frequencyUnit.apiValue,
             dueDate = dueDate,
@@ -72,6 +76,11 @@ class EventsRepository(
         eventDao.upsertEvent(entity)
         val payload = JSONObject().apply {
             put("name", name)
+            if (normalizedTag == null) {
+                put("tag", JSONObject.NULL)
+            } else {
+                put("tag", normalizedTag)
+            }
             put("due_date", dueDate.toString())
             put("frequency_value", frequencyValue)
             put("frequency_unit", frequencyUnit.apiValue)
@@ -172,10 +181,11 @@ class EventsRepository(
             CREATE -> {
                 val payload = originalChange.payload?.let(::JSONObject) ?: return null
                 val name = payload.getString("name")
+                val tag = payload.optStringOrNullCompat("tag")
                 val dueDate = LocalDate.parse(payload.getString("due_date"))
                 val freqValue = payload.getInt("frequency_value")
                 val unit = FrequencyUnit.fromApi(payload.getString("frequency_unit"))
-                val created = apiClient.createEvent(token, manualEndpoint, name, dueDate, freqValue, unit)
+                val created = apiClient.createEvent(token, manualEndpoint, name, tag, dueDate, freqValue, unit)
                 if (currentEventId != created.id) {
                     eventDao.replaceEventId(currentEventId, created.id)
                     eventDao.replaceHistoryEventId(currentEventId, created.id)
@@ -187,11 +197,13 @@ class EventsRepository(
             UPDATE -> {
                 val payload = originalChange.payload?.let(::JSONObject) ?: return null
                 val name = payload.getString("name")
+                val tag = payload.optStringOrNullCompat("tag")
                 val dueDate = LocalDate.parse(payload.getString("due_date"))
                 val freqValue = payload.getInt("frequency_value")
                 val unit = FrequencyUnit.fromApi(payload.getString("frequency_unit"))
                 return try {
-                    val updated = apiClient.updateEvent(token, manualEndpoint, currentEventId, name, dueDate, freqValue, unit)
+                    val updated =
+                        apiClient.updateEvent(token, manualEndpoint, currentEventId, name, tag, dueDate, freqValue, unit)
                     persistRemoteEvent(updated)
                     null
                 } catch (ex: ApiException) {
@@ -255,6 +267,7 @@ class EventsRepository(
         EventEntity(
             id = id,
             name = name,
+            tag = tag,
             frequencyValue = frequencyValue,
             frequencyUnit = frequencyUnit.apiValue,
             dueDate = dueDate,
@@ -296,3 +309,6 @@ class EventsRepository(
 
     data class PendingApplyResult(val newRemoteId: Int?)
 }
+
+private fun JSONObject.optStringOrNullCompat(key: String): String? =
+    if (has(key) && !isNull(key)) getString(key) else null

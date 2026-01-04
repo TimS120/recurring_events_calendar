@@ -32,6 +32,7 @@ data class SettingsUiState(
 data class EventEditorState(
     val id: Int? = null,
     val name: String = "",
+    val tag: String = "",
     val dueDate: String = LocalDate.now().toString(),
     val frequencyValue: String = "30",
     val frequencyUnit: FrequencyUnit = FrequencyUnit.DAYS
@@ -48,13 +49,29 @@ data class EventsScreenState(
     val settings: SettingsUiState = SettingsUiState(),
     val showSettings: Boolean = false,
     val editorState: EventEditorState? = null,
-    val darkModeOverride: Boolean? = null
+    val darkModeOverride: Boolean? = null,
+    val availableTags: List<String> = emptyList(),
+    val prioritizedTag: String? = null
 ) {
     val horizon: TimelineHorizon
         get() = TimelineHorizons.getOrElse(horizonIndex.coerceIn(TimelineHorizons.indices)) { TimelineHorizons.first() }
 
     val visibleEvents: List<RecurringEvent>
-        get() = events
+        get() {
+            val prioritized = prioritizedTag?.takeIf { it.isNotBlank() } ?: return events
+            val prioritizedLower = prioritized.lowercase()
+            val withTag = mutableListOf<RecurringEvent>()
+            val withoutTag = mutableListOf<RecurringEvent>()
+            events.forEach { event ->
+                val tagValue = event.tag?.trim()
+                if (!tagValue.isNullOrEmpty() && tagValue.lowercase() == prioritizedLower) {
+                    withTag += event
+                } else {
+                    withoutTag += event
+                }
+            }
+            return withTag + withoutTag
+        }
 }
 
 class EventsViewModel(application: Application) : AndroidViewModel(application) {
@@ -82,7 +99,20 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             repository.eventsFlow.collectLatest { events ->
                 _uiState.update { state ->
-                    state.copy(events = events.sortedBy { it.dueDate })
+                    val sorted = events.sortedBy { it.dueDate }
+                    val tags = sorted
+                        .mapNotNull { it.tag?.trim()?.takeIf(String::isNotEmpty) }
+                        .associateBy { it.lowercase() }
+                        .values
+                        .sortedWith(java.lang.String.CASE_INSENSITIVE_ORDER)
+                    val resolvedSelection = state.prioritizedTag?.let { selection ->
+                        tags.firstOrNull { it.equals(selection, ignoreCase = true) }
+                    }
+                    state.copy(
+                        events = sorted,
+                        availableTags = tags,
+                        prioritizedTag = resolvedSelection
+                    )
                 }
             }
         }
@@ -135,6 +165,7 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
             EventEditorState(
                 id = existing.id,
                 name = existing.name,
+                tag = existing.tag.orEmpty(),
                 dueDate = existing.dueDate.toString(),
                 frequencyValue = existing.frequencyValue.toString(),
                 frequencyUnit = existing.frequencyUnit
@@ -143,12 +174,19 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(editorState = editor, statusMessage = null, errorMessage = null) }
     }
 
-    fun updateEditor(name: String? = null, dueDate: String? = null, frequencyValue: String? = null, unit: FrequencyUnit? = null) {
+    fun updateEditor(
+        name: String? = null,
+        tag: String? = null,
+        dueDate: String? = null,
+        frequencyValue: String? = null,
+        unit: FrequencyUnit? = null
+    ) {
         _uiState.update { state ->
             val editor = state.editorState ?: return
             state.copy(
                 editorState = editor.copy(
                     name = name ?: editor.name,
+                    tag = tag ?: editor.tag,
                     dueDate = dueDate ?: editor.dueDate,
                     frequencyValue = frequencyValue ?: editor.frequencyValue,
                     frequencyUnit = unit ?: editor.frequencyUnit
@@ -158,6 +196,8 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun updateEditorName(value: String) = updateEditor(name = value)
+
+    fun updateEditorTag(value: String) = updateEditor(tag = value)
 
     fun updateEditorDueDate(value: String) = updateEditor(dueDate = value)
 
@@ -244,6 +284,7 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
             repository.saveEventLocally(
                 inputId = editor.id,
                 name = name,
+                tag = editor.tag.trim().takeIf { it.isNotEmpty() },
                 dueDate = dueDate,
                 frequencyValue = freqValue,
                 frequencyUnit = editor.frequencyUnit,
@@ -283,6 +324,16 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
             val target = !baseline
             val newOverride = if (target == systemDark) null else target
             state.copy(darkModeOverride = newOverride)
+        }
+    }
+
+    fun prioritizeTag(tag: String?) {
+        _uiState.update { state ->
+            val cleaned = tag?.takeIf { it.isNotBlank() }
+            val allowed = cleaned?.let { candidate ->
+                state.availableTags.firstOrNull { it.equals(candidate, ignoreCase = true) }
+            }
+            state.copy(prioritizedTag = allowed)
         }
     }
 

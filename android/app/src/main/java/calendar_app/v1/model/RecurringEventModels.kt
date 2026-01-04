@@ -25,6 +25,7 @@ data class EventHistory(
 data class RecurringEvent(
     val id: Int,
     val name: String,
+    val tag: String?,
     val frequencyValue: Int,
     val frequencyUnit: FrequencyUnit,
     val dueDate: LocalDate,

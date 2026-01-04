@@ -46,6 +46,7 @@ class EventsApiClient(
         token: String,
         manualEndpoint: MdnsEndpoint?,
         name: String,
+        tag: String?,
         dueDate: LocalDate,
         frequencyValue: Int,
         frequencyUnit: FrequencyUnit
@@ -53,6 +54,11 @@ class EventsApiClient(
         val endpoint = resolveEndpoint(manualEndpoint)
         val body = JSONObject().apply {
             put("name", name)
+            if (tag == null) {
+                put("tag", JSONObject.NULL)
+            } else {
+                put("tag", tag)
+            }
             put("due_date", dueDate.toString())
             put("frequency_value", frequencyValue)
             put("frequency_unit", frequencyUnit.apiValue)
@@ -77,6 +83,7 @@ class EventsApiClient(
         manualEndpoint: MdnsEndpoint?,
         eventId: Int,
         name: String,
+        tag: String?,
         dueDate: LocalDate,
         frequencyValue: Int,
         frequencyUnit: FrequencyUnit
@@ -84,6 +91,11 @@ class EventsApiClient(
         val endpoint = resolveEndpoint(manualEndpoint)
         val body = JSONObject().apply {
             put("name", name)
+            if (tag == null) {
+                put("tag", JSONObject.NULL)
+            } else {
+                put("tag", tag)
+            }
             put("due_date", dueDate.toString())
             put("frequency_value", frequencyValue)
             put("frequency_unit", frequencyUnit.apiValue)
@@ -166,6 +178,7 @@ class EventsApiClient(
         return RecurringEvent(
             id = getInt("id"),
             name = getString("name"),
+            tag = optStringOrNull("tag"),
             frequencyValue = getInt("frequency_value"),
             frequencyUnit = FrequencyUnit.fromApi(getString("frequency_unit")),
             dueDate = LocalDate.parse(getString("due_date")),

@@ -29,6 +29,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Settings
@@ -68,6 +69,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupProperties
 import calendar_app.v1.model.FrequencyUnit
 import calendar_app.v1.model.RecurringEvent
 import calendar_app.v1.model.TimelineHorizons
@@ -102,13 +104,15 @@ fun EventsScreen(
     onManualPortChange: (String) -> Unit,
     onApplySettings: () -> Unit,
     onEditorNameChange: (String) -> Unit,
+    onEditorTagChange: (String) -> Unit,
     onEditorDueDateChange: (String) -> Unit,
     onEditorFrequencyValueChange: (String) -> Unit,
     onEditorUnitChange: (FrequencyUnit) -> Unit,
     onSubmitEditor: () -> Unit,
     onCloseEditor: () -> Unit,
     onClearMessage: () -> Unit,
-    onToggleDarkMode: () -> Unit
+    onToggleDarkMode: () -> Unit,
+    onTagPrioritySelected: (String?) -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState()
     if (state.showSettings) {
@@ -133,11 +137,13 @@ fun EventsScreen(
         EventEditorDialog(
             editor = editor,
             onNameChange = onEditorNameChange,
+            onTagChange = onEditorTagChange,
             onDueDateChange = onEditorDueDateChange,
             onFrequencyChange = onEditorFrequencyValueChange,
             onUnitChange = onEditorUnitChange,
             onConfirm = onSubmitEditor,
             onDismiss = onCloseEditor,
+            tagSuggestions = state.availableTags,
             onDelete = editor.id?.let { id ->
                 {
                     onDeleteEvent(id)
@@ -172,15 +178,18 @@ fun EventsScreen(
                 isDarkTheme = isDarkTheme,
                 onNewEvent = { onOpenEditor(null) },
                 onSync = onSync,
-                onToggleDarkMode = onToggleDarkMode,
-                onShowSettings = { onToggleSettings(true) },
-                onHorizonSelected = onHorizonSelected,
-                onJumpToToday = {
-                    jumpToTodayNonce++
-                    onTimelineOffsetChange(0)
-                },
-                onTimelineOffsetChange = onTimelineOffsetChange
-            )
+            onToggleDarkMode = onToggleDarkMode,
+            onShowSettings = { onToggleSettings(true) },
+            onHorizonSelected = onHorizonSelected,
+            onJumpToToday = {
+                jumpToTodayNonce++
+                onTimelineOffsetChange(0)
+            },
+            onTimelineOffsetChange = onTimelineOffsetChange,
+            onTagSelected = onTagPrioritySelected,
+            selectedTag = state.prioritizedTag,
+            availableTags = state.availableTags
+        )
             Spacer(Modifier.height(12.dp))
         EventsTable(
             state = state,
@@ -224,7 +233,10 @@ private fun HeaderSection(
     onShowSettings: () -> Unit,
     onHorizonSelected: (Int) -> Unit,
     onJumpToToday: () -> Unit,
-    onTimelineOffsetChange: (Int) -> Unit
+    onTimelineOffsetChange: (Int) -> Unit,
+    onTagSelected: (String?) -> Unit,
+    selectedTag: String?,
+    availableTags: List<String>
 ) {
     val expanded = remember { mutableStateOf(false) }
     Text(
@@ -294,6 +306,45 @@ private fun HeaderSection(
             Text("Today")
         }
     }
+    Spacer(Modifier.height(8.dp))
+    TagPrioritySelector(
+        selectedTag = selectedTag,
+        availableTags = availableTags,
+        onTagSelected = onTagSelected
+    )
+}
+
+@Composable
+private fun TagPrioritySelector(
+    selectedTag: String?,
+    availableTags: List<String>,
+    onTagSelected: (String?) -> Unit
+) {
+    val expanded = remember { mutableStateOf(false) }
+    Column {
+        Text("Prioritize tag", fontWeight = FontWeight.Medium)
+        Button(onClick = { expanded.value = true }) {
+            Text(selectedTag ?: "All tags")
+        }
+        DropdownMenu(expanded = expanded.value, onDismissRequest = { expanded.value = false }) {
+            DropdownMenuItem(
+                text = { Text("All tags") },
+                onClick = {
+                    onTagSelected(null)
+                    expanded.value = false
+                }
+            )
+            availableTags.forEach { tag ->
+                DropdownMenuItem(
+                    text = { Text(tag) },
+                    onClick = {
+                        onTagSelected(tag)
+                        expanded.value = false
+                    }
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -312,7 +363,7 @@ private fun EventsTable(
     val rowsCount = visibleEvents.size
     val totalRowsHeight = if (rowsCount > 0) (rowHeight + rowSpacing) * rowsCount else 0.dp
     val timelineHeight = maxOf(totalRowsHeight + AxisPadding, 220.dp)
-    val listWidth = 240.dp
+    val listWidth = 320.dp
     val timelineWidth = maxOf(maxWidth - listWidth - 24.dp, 300.dp)
     val horizontalScroll = rememberScrollState()
     val sliderRange = state.horizon.sliderRange
@@ -454,7 +505,15 @@ private fun EventCard(
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
             Text(event.name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Text(event.cadenceText, color = Color(0xFF4A5568))
+            val secondaryLine = buildString {
+                append(event.cadenceText)
+                val tagText = event.tag?.trim()?.takeIf { it.isNotEmpty() }
+                if (tagText != null) {
+                    append(" | Tag: ")
+                    append(tagText)
+                }
+            }
+            Text(secondaryLine, color = Color(0xFF4A5568))
             val dueStatus = when {
                 event.dueDate == LocalDate.now() -> "Due today"
                 event.dueDate.isBefore(LocalDate.now()) -> "Overdue since ${event.dueDate}"
@@ -538,23 +597,10 @@ private fun TimelineCanvas(
         }
 
         val today = LocalDate.now()
-        if (!today.isBefore(viewStart) && !today.isAfter(viewEnd)) {
-            val todayX = dateToX(today)
-            drawLine(
-                color = Color(0xFFFF8800),
-                start = Offset(todayX, topPadding - 20),
-                end = Offset(todayX, size.height),
-                strokeWidth = 3f
-            )
-            val todayLabelPaint = android.graphics.Paint(labelPaint).apply {
-                textAlign = android.graphics.Paint.Align.LEFT
-            }
-            drawContext.canvas.nativeCanvas.drawText(
-                "Today",
-                todayX + 8f,
-                topPadding,
-                todayLabelPaint
-            )
+        val todayX = if (!today.isBefore(viewStart) && !today.isAfter(viewEnd)) {
+            dateToX(today)
+        } else {
+            null
         }
 
         val rowStride = rowHeightPx + rowSpacingPx
@@ -605,6 +651,25 @@ private fun TimelineCanvas(
                 iterations++
             }
         }
+
+        if (todayX != null) {
+            drawLine(
+                color = Color(0xFFFF8800),
+                start = Offset(todayX, topPadding - 20),
+                end = Offset(todayX, size.height),
+                strokeWidth = 3f
+            )
+            val todayLabelPaint = android.graphics.Paint(labelPaint).apply {
+                textAlign = android.graphics.Paint.Align.LEFT
+                color = android.graphics.Color.parseColor("#FF8800")
+            }
+            drawContext.canvas.nativeCanvas.drawText(
+                "Today",
+                todayX + 8f,
+                topPadding,
+                todayLabelPaint
+            )
+        }
     }
 }
 
@@ -650,11 +715,13 @@ private fun SettingsSheet(
 private fun EventEditorDialog(
     editor: EventEditorState,
     onNameChange: (String) -> Unit,
+    onTagChange: (String) -> Unit,
     onDueDateChange: (String) -> Unit,
     onFrequencyChange: (String) -> Unit,
     onUnitChange: (FrequencyUnit) -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    tagSuggestions: List<String>,
     onDelete: (() -> Unit)?,
     onMarkDone: (() -> Unit)? = null
 ) {
@@ -682,6 +749,11 @@ private fun EventEditorDialog(
                     onValueChange = onNameChange,
                     label = { Text("Name") },
                     modifier = Modifier.fillMaxWidth()
+                )
+                TagSuggestionField(
+                    value = editor.tag,
+                    onValueChange = onTagChange,
+                    suggestions = tagSuggestions
                 )
                 OutlinedTextField(
                     value = editor.dueDate,
@@ -725,6 +797,72 @@ private fun FrequencyDropdown(
                     onClick = {
                         onSelected(unit)
                         expanded.value = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TagSuggestionField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    suggestions: List<String>
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val trimmedSuggestions = remember(suggestions) {
+        suggestions.distinctBy { it.lowercase() }.sortedWith(String.CASE_INSENSITIVE_ORDER)
+    }
+    val filterSuggestions = remember(trimmedSuggestions) {
+        { query: String ->
+            val normalized = query.trim()
+            if (normalized.isEmpty()) {
+                trimmedSuggestions
+            } else {
+                trimmedSuggestions.filter { it.startsWith(normalized, ignoreCase = true) }
+            }
+        }
+    }
+    val filtered = remember(value, trimmedSuggestions) { filterSuggestions(value) }
+    Box {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {
+                onValueChange(it)
+                expanded = filterSuggestions(it).isNotEmpty()
+            },
+            label = { Text("Tag (optional)") },
+            modifier = Modifier
+                .fillMaxWidth(),
+            trailingIcon = {
+                IconButton(
+                    onClick = {
+                        if (filtered.isNotEmpty()) {
+                            expanded = !expanded
+                        }
+                    },
+                    enabled = filtered.isNotEmpty()
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.ArrowDropDown,
+                        contentDescription = "Show tags"
+                    )
+                }
+            },
+            singleLine = true
+        )
+        DropdownMenu(
+            expanded = expanded && filtered.isNotEmpty(),
+            onDismissRequest = { expanded = false },
+            properties = PopupProperties(focusable = false)
+        ) {
+            filtered.forEach { suggestion ->
+                DropdownMenuItem(
+                    text = { Text(suggestion) },
+                    onClick = {
+                        onValueChange(suggestion)
+                        expanded = false
                     }
                 )
             }

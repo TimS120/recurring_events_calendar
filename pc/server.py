@@ -68,6 +68,7 @@ class FrequencyUnit(str, Enum):
 
 class EventBase(BaseModel):
     name: constr(min_length=1, max_length=128)
+    tag: Optional[constr(min_length=1, max_length=64)] = None
     due_date: date
     frequency_value: int = Field(..., gt=0, le=1000)
     frequency_unit: FrequencyUnit
@@ -79,6 +80,7 @@ class EventCreateRequest(EventBase):
 
 class EventUpdateRequest(BaseModel):
     name: Optional[constr(min_length=1, max_length=128)]
+    tag: Optional[constr(min_length=1, max_length=64)]
     due_date: Optional[date]
     frequency_value: Optional[int] = Field(None, gt=0, le=1000)
     frequency_unit: Optional[FrequencyUnit]
@@ -99,6 +101,7 @@ class EventHistoryResponse(BaseModel):
 class EventResponse(BaseModel):
     id: int
     name: str
+    tag: Optional[str]
     frequency_value: int
     frequency_unit: FrequencyUnit
     due_date: date
@@ -208,6 +211,7 @@ def event_to_response(record: EventRecord, history: Optional[List[HistoryRecord]
     return EventWithHistoryResponse(
         id=record.id,
         name=record.name,
+        tag=record.tag,
         frequency_value=record.frequency_value,
         frequency_unit=FrequencyUnit(record.frequency_unit),
         due_date=record.due_date,
@@ -277,6 +281,7 @@ async def list_events_api(
 async def create_event_api(payload: EventCreateRequest) -> EventWithHistoryResponse:
     record = create_event(
         name=payload.name,
+        tag=payload.tag,
         due_date=payload.due_date,
         frequency_value=payload.frequency_value,
         frequency_unit=payload.frequency_unit.value,
@@ -311,6 +316,7 @@ async def update_event_api(event_id: int, payload: EventUpdateRequest) -> EventW
         record = update_event(
             event_id,
             name=data.get("name"),
+            tag=data.get("tag"),
             due_date=data.get("due_date"),
             frequency_value=data.get("frequency_value"),
             frequency_unit=freq_unit.value if freq_unit else None,

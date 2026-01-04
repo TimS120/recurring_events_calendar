@@ -48,13 +48,15 @@ class MainActivity : ComponentActivity() {
                     onManualPortChange = viewModel::updateManualPort,
                     onApplySettings = viewModel::useSettingsDefaults,
                     onEditorNameChange = viewModel::updateEditorName,
+                    onEditorTagChange = viewModel::updateEditorTag,
                     onEditorDueDateChange = viewModel::updateEditorDueDate,
                     onEditorFrequencyValueChange = viewModel::updateEditorFrequencyValue,
                     onEditorUnitChange = viewModel::updateEditorUnit,
                     onSubmitEditor = viewModel::submitEditor,
                     onCloseEditor = viewModel::closeEditor,
                     onClearMessage = viewModel::clearMessages,
-                    onToggleDarkMode = { viewModel.toggleDarkMode(systemDark) }
+                    onToggleDarkMode = { viewModel.toggleDarkMode(systemDark) },
+                    onTagPrioritySelected = viewModel::prioritizeTag
                 )
             }
         }

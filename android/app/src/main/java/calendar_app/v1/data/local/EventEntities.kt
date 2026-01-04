@@ -15,6 +15,7 @@ data class EventEntity(
     @PrimaryKey
     val id: Int,
     val name: String,
+    val tag: String?,
     val frequencyValue: Int,
     val frequencyUnit: String,
     val dueDate: LocalDate,
@@ -47,6 +48,7 @@ fun EventWithHistoryEntity.toModel(): RecurringEvent =
     RecurringEvent(
         id = event.id,
         name = event.name,
+        tag = event.tag,
         frequencyValue = event.frequencyValue,
         frequencyUnit = FrequencyUnit.fromApi(event.frequencyUnit),
         dueDate = event.dueDate,
