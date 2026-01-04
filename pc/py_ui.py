@@ -168,6 +168,7 @@ VISIBLE_ROWS = 6
 ROW_HEIGHT = 90
 ROW_BASE_OFFSET = 70
 LIST_BASE_OFFSET = 42
+ROW_SPACING = 12
 DELETE_SENTINEL_KEY = "__delete__"
 MARK_DONE_SENTINEL_KEY = "__mark_done__"
 TAG_PRIORITY_ALL = "All tags"
@@ -504,6 +505,7 @@ class EventDialog(simpledialog.Dialog):
         self.due_entry: Optional[ttk.Entry] = None
         self._date_picker: Optional[CalendarPopup] = None
         self._due_trigger_btn: Optional[ttk.Button] = None
+        self.details_input: Optional[tk.Text] = None
         super().__init__(master, title)
 
     def body(self, master: tk.Widget) -> tk.Widget:
@@ -525,6 +527,15 @@ class EventDialog(simpledialog.Dialog):
         self.tag_input = ttk.Combobox(master, textvariable=self.tag_var, values=tag_values, width=30)
         self.tag_input.grid(row=row, column=0, columnspan=2, sticky="we", pady=(0, 8))
         self._setup_tag_autocomplete()
+        row += 1
+
+        ttk.Label(master, text="Additional details (optional)").grid(row=row, column=0, sticky="w")
+        row += 1
+        details_text = (self.event.details or "") if self.event else ""
+        self.details_input = tk.Text(master, height=4, width=36, wrap="word")
+        self.details_input.grid(row=row, column=0, columnspan=2, sticky="we", pady=(0, 8))
+        self.details_input.insert("1.0", details_text)
+        self._apply_text_widget_theme(self.details_input)
         row += 1
 
         ttk.Label(master, text="Next due date (DD.MM.YYYY)").grid(row=row, column=0, sticky="w")
@@ -585,9 +596,16 @@ class EventDialog(simpledialog.Dialog):
         if len(tag_text) > 64:
             messagebox.showerror("Invalid data", "Tags must be 64 characters or fewer.")
             return False
+        details_text = ""
+        if self.details_input is not None:
+            details_text = self.details_input.get("1.0", "end").strip()
+        if len(details_text) > 2048:
+            messagebox.showerror("Invalid data", "Details must be 2048 characters or fewer.")
+            return False
         self.result_data = {
             "name": name,
             "tag": tag_text,
+            "details": details_text,
             "due_date": due_date,
             "frequency_value": freq_value,
             "frequency_unit": unit,
@@ -806,6 +824,8 @@ class EventDialog(simpledialog.Dialog):
             body_frame.configure(bg=theme.background)
         except tk.TclError:
             pass
+        if self.details_input is not None:
+            self._apply_text_widget_theme(self.details_input)
         self.bind("<Map>", self._apply_titlebar_theme, add="+")
         if self.winfo_ismapped():
             self._apply_titlebar_theme()
@@ -818,12 +838,205 @@ class EventDialog(simpledialog.Dialog):
         theme = self.theme_provider()
         set_windows_titlebar_theme(self, theme.name.lower() == "dark")
 
+    def _apply_text_widget_theme(self, widget: tk.Text) -> None:
+        if self.theme_provider is None:
+            return
+        theme = self.theme_provider()
+        try:
+            widget.configure(
+                bg=theme.surface,
+                fg=theme.text_primary,
+                insertbackground=theme.text_primary,
+                selectbackground=theme.timeline_row_default,
+                selectforeground=theme.text_primary,
+                highlightbackground=theme.panel_surface,
+                highlightcolor=theme.panel_surface,
+            )
+        except tk.TclError:
+            pass
+
+
+class EventDetailsWindow(tk.Toplevel):
+    def __init__(
+        self,
+        master: tk.Widget,
+        event: EventRecord,
+        history: Sequence[HistoryRecord],
+        *,
+        theme_provider: Optional[Callable[[], ThemePalette]] = None,
+        on_edit: Optional[Callable[[int], None]] = None,
+        on_close: Optional[Callable[[int], None]] = None,
+    ) -> None:
+        super().__init__(master)
+        self.withdraw()
+        self._event = event
+        self._history = list(history)
+        self._theme_provider = theme_provider
+        self._on_edit = on_edit
+        self._on_close = on_close
+        self._closed = False
+        self.title("Event details")
+        self.resizable(True, False)
+        self._build_widgets()
+        self.update_content(event, history)
+        self.apply_theme()
+        self.protocol("WM_DELETE_WINDOW", self._handle_close)
+        self.transient(master)
+        self.deiconify()
+        self.focus_force()
+        self.bind("<Map>", self._apply_titlebar_theme, add="+")
+        if self.winfo_ismapped():
+            self._apply_titlebar_theme()
+        else:
+            self.after_idle(self._apply_titlebar_theme)
+
+    def _build_widgets(self) -> None:
+        self._container = tk.Frame(self)
+        self._container.pack(fill="both", expand=True, padx=12, pady=12)
+        self._container.columnconfigure(0, weight=1)
+        self._container.rowconfigure(3, weight=1)
+        self._name_label = tk.Label(self._container, font=("Segoe UI", 13, "bold"))
+        self._name_label.grid(row=0, column=0, sticky="w")
+
+        info_frame = tk.Frame(self._container)
+        info_frame.grid(row=1, column=0, sticky="we", pady=(8, 4))
+        info_frame.columnconfigure(0, weight=1)
+        self._info_frame = info_frame
+
+        self._due_label = tk.Label(info_frame, text="")
+        self._due_label.grid(row=0, column=0, sticky="w")
+        self._cadence_label = tk.Label(info_frame, text="")
+        self._cadence_label.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        self._tag_label = tk.Label(info_frame, text="")
+        self._tag_label.grid(row=2, column=0, sticky="w", pady=(2, 0))
+        self._last_done_label = tk.Label(info_frame, text="")
+        self._last_done_label.grid(row=3, column=0, sticky="w", pady=(2, 0))
+        self._history_label = tk.Label(info_frame, text="")
+        self._history_label.grid(row=4, column=0, sticky="w", pady=(2, 0))
+
+        ttk.Label(self._container, text="Additional details").grid(row=2, column=0, sticky="w", pady=(12, 4))
+        self._details_frame = tk.Frame(self._container, borderwidth=1, relief="solid")
+        self._details_frame.grid(row=3, column=0, sticky="nsew")
+        self._details_frame.columnconfigure(0, weight=1)
+        self._details_text = tk.Text(
+            self._details_frame,
+            height=8,
+            wrap="word",
+            relief="flat",
+            highlightthickness=0,
+            state="disabled",
+        )
+        self._details_text.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(self._details_frame, orient="vertical", command=self._details_text.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self._details_text.configure(yscrollcommand=scrollbar.set)
+
+        button_frame = ttk.Frame(self._container)
+        button_frame.grid(row=4, column=0, sticky="e", pady=(12, 0))
+        ttk.Button(button_frame, text="Edit event", command=self._handle_edit).pack(side="left", padx=(0, 6))
+        ttk.Button(button_frame, text="Close", command=self._handle_close).pack(side="left")
+
+    def update_content(self, event: EventRecord, history: Sequence[HistoryRecord]) -> None:
+        self._event = event
+        self._history = list(history)
+        self._name_label.configure(text=event.name)
+        self._due_label.configure(text=f"Next due: {format_display_date(event.due_date)}")
+        freq_text = f"Every {event.frequency_value} {event.frequency_unit}"
+        self._cadence_label.configure(text=f"Cadence: {freq_text}")
+        tag_value = (event.tag or "").strip() or "No tag"
+        self._tag_label.configure(text=f"Tag: {tag_value}")
+        if event.last_done:
+            last_done_text = format_display_date(event.last_done)
+        else:
+            last_done_text = "n/a"
+        self._last_done_label.configure(text=f"Last done: {last_done_text}")
+        if self._history:
+            latest = self._history[0]
+            hist_text = f"Latest: {latest.action} on {format_display_date(latest.action_date)}"
+        else:
+            hist_text = "No recent history."
+        self._history_label.configure(text=hist_text)
+        details_text = (event.details or "").strip()
+        if not details_text:
+            details_text = "No additional information was provided for this event."
+        self._details_text.configure(state="normal")
+        self._details_text.delete("1.0", "end")
+        self._details_text.insert("1.0", details_text)
+        self._details_text.configure(state="disabled")
+
+    def apply_theme(self, theme: Optional[ThemePalette] = None) -> None:
+        palette = theme or (self._theme_provider() if self._theme_provider else None)
+        background = palette.background if palette else "#ffffff"
+        surface = palette.surface if palette else "#f7f7f7"
+        panel = palette.panel_surface if palette else "#f0f0f0"
+        text_primary = palette.text_primary if palette else "#000000"
+        border = palette.timeline_axis if palette else "#666666"
+        try:
+            self.configure(bg=background)
+            self._container.configure(bg=background)
+            if hasattr(self, "_info_frame"):
+                self._info_frame.configure(bg=background)
+        except tk.TclError:
+            pass
+        for widget in (
+            self._name_label,
+            self._due_label,
+            self._cadence_label,
+            self._tag_label,
+            self._last_done_label,
+            self._history_label,
+        ):
+            widget.configure(background=background, foreground=text_primary)
+        try:
+            self._details_frame.configure(bg=panel, highlightbackground=border, highlightcolor=border)
+            self._details_text.configure(
+                bg=surface,
+                fg=text_primary,
+                insertbackground=text_primary,
+                selectbackground=palette.timeline_row_default if palette else "#d0d0d0",
+                selectforeground=text_primary,
+            )
+        except tk.TclError:
+            pass
+        self._apply_titlebar_theme()
+
+    def _handle_edit(self) -> None:
+        if self._on_edit and self._event:
+            callback = self._on_edit
+            event_id = self._event.id
+            self._handle_close()
+            callback(event_id)
+
+    def _handle_close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            if self._on_close and self._event:
+                self._on_close(self._event.id)
+        finally:
+            try:
+                self.destroy()
+            except tk.TclError:
+                pass
+
+    def close(self) -> None:
+        self._handle_close()
+
+    def _apply_titlebar_theme(self, _event: Optional[tk.Event] = None) -> None:
+        if self._theme_provider is None:
+            return
+        try:
+            set_windows_titlebar_theme(self, self._theme_provider().name.lower() == "dark")
+        except tk.TclError:
+            pass
 
 class EventListCanvas(tk.Canvas):
     def __init__(
         self,
         master: tk.Widget,
         on_edit: Callable[[int], None],
+        on_show_details: Callable[[int], None],
         on_viewport_change: Callable[[int], None],
         theme_provider: Callable[[], ThemePalette],
     ) -> None:
@@ -832,9 +1045,12 @@ class EventListCanvas(tk.Canvas):
         super().__init__(master, background=self.theme_provider().canvas_background, highlightthickness=0)
         self.events: List[Tuple[EventRecord, List[HistoryRecord]]] = []
         self.on_edit = on_edit
+        self.on_show_details = on_show_details
         self.scroll_offset = 0.0
         self.viewport_height = VISIBLE_ROWS * ROW_HEIGHT
         self.hit_regions: List[Tuple[str, int, float, float, float, float]] = []
+        self.row_heights: dict[int, float] = {}
+        self.content_height: float = LIST_BASE_OFFSET
         self.bind("<Configure>", self._handle_configure)
         self.bind("<Button-1>", self._handle_click)
 
@@ -855,6 +1071,8 @@ class EventListCanvas(tk.Canvas):
             if x1 <= x <= x2 and y1 <= y <= y2:
                 if action == "edit":
                     self.on_edit(event_id)
+                elif action == "details":
+                    self.on_show_details(event_id)
                 break
 
     def redraw(self) -> None:
@@ -863,8 +1081,10 @@ class EventListCanvas(tk.Canvas):
         self.configure(background=theme.canvas_background)
         width = self.winfo_width() or 260
         height = max(self.viewport_height + LIST_BASE_OFFSET, self.winfo_height())
-        self.config(scrollregion=(0, 0, width, height))
         self.hit_regions.clear()
+        self.row_heights.clear()
+        y_offset = 0.0
+        name_width = max(80, width - 160)
         if not self.events:
             self.create_text(
                 width / 2,
@@ -873,35 +1093,40 @@ class EventListCanvas(tk.Canvas):
                 fill=theme.placeholder_text,
                 font=("Segoe UI", 12),
             )
+            self.content_height = LIST_BASE_OFFSET + ROW_HEIGHT
+            self.config(scrollregion=(0, 0, width, max(height, self.content_height)))
             return
         today = date.today()
-        for index, (event, _history) in enumerate(self.events):
-            row_top = LIST_BASE_OFFSET + index * ROW_HEIGHT - self.scroll_offset
-            row_bottom = row_top + ROW_HEIGHT - 10
-            if row_bottom < LIST_BASE_OFFSET - ROW_HEIGHT or row_top > height:
-                continue
+        for event, _history in self.events:
+            row_start = LIST_BASE_OFFSET + y_offset
+            row_top = row_start - self.scroll_offset
+            rect_id = self.create_rectangle(10, row_top, width - 10, row_top + ROW_HEIGHT, outline="", fill="")
             bg_color = theme.list_row_overdue if event.due_date <= today else theme.list_row_default
-            self.create_rectangle(10, row_top, width - 10, row_bottom, fill=bg_color, outline=theme.text_secondary)
             text_y = row_top + 12
-            self.create_text(
+            name_item = self.create_text(
                 20,
                 text_y,
                 text=event.name,
                 anchor="nw",
+                width=name_width,
+                justify="left",
                 font=("Segoe UI", 11, "bold"),
                 fill=theme.text_primary,
             )
+            name_bbox = self.bbox(name_item)
+            next_y = (name_bbox[3] if name_bbox else text_y + 18) + 4
             freq_text = f"Every {event.frequency_value} {event.frequency_unit}"
             if event.tag:
                 freq_text = f"{freq_text} | Tag: {event.tag}"
-            self.create_text(
+            freq_item = self.create_text(
                 20,
-                text_y + 20,
+                next_y,
                 text=freq_text,
                 anchor="nw",
                 font=("Segoe UI", 9),
                 fill=theme.text_secondary,
             )
+            freq_bbox = self.bbox(freq_item)
 
             status_color = theme.due_upcoming
             if event.due_date <= today:
@@ -918,16 +1143,56 @@ class EventListCanvas(tk.Canvas):
                 residual_pct = _calculate_residual_percentage(event, today)
                 if residual_pct is not None:
                     status_text = f"{status_text} ({residual_pct}%)"
-            self.create_text(
+            status_y = (freq_bbox[3] if freq_bbox else next_y + 16) + 4
+            status_item = self.create_text(
                 20,
-                text_y + 40,
+                status_y,
                 text=status_text,
                 anchor="nw",
                 font=("Segoe UI", 9, "bold"),
                 fill=status_color,
             )
 
-            self.hit_regions.append(("edit", event.id, 10, row_top, width - 20, row_bottom))
+            has_details = bool((event.details or "").strip())
+            indicator_bbox = None
+            if has_details:
+                indicator = self.create_text(
+                    width - 40,
+                    row_top + 8,
+                    text="[i]",
+                    anchor="ne",
+                    font=("Segoe UI", 9, "bold"),
+                    fill=theme.due_upcoming,
+                )
+                indicator_bbox = self.bbox(indicator)
+                if indicator_bbox:
+                    self.hit_regions.append(("details", event.id, *indicator_bbox))
+
+            text_bboxes = [bbox for bbox in (name_bbox, freq_bbox, self.bbox(status_item)) if bbox]
+            max_bottom = max((bbox[3] for bbox in text_bboxes), default=row_top + ROW_HEIGHT - 20)
+            row_height = max(60.0, (max_bottom - row_top) + 20)
+            row_bottom = row_top + row_height
+            self.coords(rect_id, 10, row_top, width - 10, row_bottom)
+            self.itemconfigure(rect_id, fill=bg_color, outline=theme.text_secondary)
+
+            edit_item = self.create_text(
+                width - 20,
+                row_bottom - 18,
+                text="[Edit]",
+                anchor="ne",
+                font=("Segoe UI", 9, "underline"),
+                fill=theme.due_upcoming,
+            )
+            edit_bbox = self.bbox(edit_item)
+            if edit_bbox:
+                self.hit_regions.append(("edit", event.id, *edit_bbox))
+            self.hit_regions.append(("details", event.id, 12, row_top, width - 60, row_bottom))
+            self.row_heights[event.id] = row_height
+            y_offset += row_height + ROW_SPACING
+
+        self.content_height = LIST_BASE_OFFSET + y_offset
+        scroll_height = max(height, self.content_height + ROW_SPACING)
+        self.config(scrollregion=(0, 0, width, scroll_height))
 
     def _handle_configure(self, event: tk.Event) -> None:
         new_height = int(getattr(event, "height", self.viewport_height))
@@ -947,6 +1212,7 @@ class TimelineCanvas(tk.Canvas):
         self.horizon_name = "Day"
         self.scroll_offset = 0.0
         self.viewport_height = VISIBLE_ROWS * ROW_HEIGHT
+        self.row_heights: List[float] = []
         self.bind("<Configure>", lambda _: self.redraw())
 
     def update_view(
@@ -958,6 +1224,7 @@ class TimelineCanvas(tk.Canvas):
         label_format: str,
         scroll_offset: float,
         viewport_height: int,
+        row_heights: Sequence[float],
     ) -> None:
         self.events = list(events)
         self.view_start = view_start
@@ -966,6 +1233,7 @@ class TimelineCanvas(tk.Canvas):
         self.label_format = label_format
         self.scroll_offset = scroll_offset
         self.viewport_height = viewport_height
+        self.row_heights = list(row_heights)
         self.redraw()
 
     def redraw(self) -> None:
@@ -973,7 +1241,15 @@ class TimelineCanvas(tk.Canvas):
         theme = self.theme_provider()
         self.configure(background=theme.timeline_backdrop)
         width = max(self.winfo_width(), 600)
-        height = max(self.viewport_height + ROW_BASE_OFFSET + 50, self.winfo_height())
+        if not self.row_heights and self.events:
+            self.row_heights = [ROW_HEIGHT for _ in self.events]
+        row_spacing = ROW_SPACING
+        total_rows_height = sum(self.row_heights) + row_spacing * max(len(self.row_heights) - 1, 0)
+        height = max(
+            self.viewport_height + ROW_BASE_OFFSET + 50,
+            ROW_BASE_OFFSET + total_rows_height + 50,
+            self.winfo_height(),
+        )
         margin = 60
         axis_y = 40
         today = date.today()
@@ -1028,15 +1304,27 @@ class TimelineCanvas(tk.Canvas):
             )
             return
 
+        y_offset = 0.0
         for index, (event, history) in enumerate(self.events):
-            row_top = ROW_BASE_OFFSET + index * ROW_HEIGHT - self.scroll_offset
-            row_bottom = row_top + ROW_HEIGHT - 20
+            row_height = self.row_heights[index] if index < len(self.row_heights) else ROW_HEIGHT - 10
+            row_top = ROW_BASE_OFFSET + y_offset - self.scroll_offset
+            row_bottom = row_top + row_height
             row_mid = (row_top + row_bottom) / 2
             if row_bottom < axis_y or row_top > height:
+                y_offset += row_height + row_spacing
                 continue
             bg_color = theme.timeline_row_overdue if event.is_overdue() else theme.timeline_row_default
             self.create_rectangle(margin, row_top, width - margin, row_bottom, fill=bg_color, outline="")
             self.create_line(margin, row_mid, width - margin, row_mid, fill=theme.timeline_line)
+            if (event.details or "").strip():
+                self.create_oval(
+                    margin - 35,
+                    row_top + 8,
+                    margin - 15,
+                    row_top + 28,
+                    fill=theme.due_upcoming,
+                    outline="",
+                )
 
             for entry in history:
                 if not (self.view_start <= entry.action_date <= self.view_end):
@@ -1063,6 +1351,8 @@ class TimelineCanvas(tk.Canvas):
                     )
                 due_marker = add_frequency(due_marker, event.frequency_value, event.frequency_unit)
                 iterations += 1
+
+            y_offset += row_height + row_spacing
 
         if today_line_x is not None:
             self.create_line(today_line_x, axis_y, today_line_x, height, dash=(4, 4), fill=theme.today_color, width=2)
@@ -1105,6 +1395,7 @@ class RecurringEventsUI:
         self._available_tags: List[str] = []
         self._display_events: List[Tuple[EventRecord, List[HistoryRecord]]] = []
         self.viewport_height = VISIBLE_ROWS * ROW_HEIGHT
+        self._detail_windows: dict[int, EventDetailsWindow] = {}
 
         self._build_layout()
         self.apply_theme()
@@ -1197,6 +1488,9 @@ class RecurringEventsUI:
             self._titlebar_needs_update = False
         else:
             self._titlebar_needs_update = True
+        for window in list(self._detail_windows.values()):
+            if window.winfo_exists():
+                window.apply_theme(self.current_theme())
 
     def _theme_button_text(self) -> str:
         return "Switch to light mode" if self.theme_mode == "dark" else "Switch to dark mode"
@@ -1256,6 +1550,7 @@ class RecurringEventsUI:
         self.list_canvas = EventListCanvas(
             self.left_panel,
             on_edit=self._handle_edit_from_canvas,
+            on_show_details=self._show_event_details,
             on_viewport_change=self._handle_list_viewport_change,
             theme_provider=self.current_theme,
         )
@@ -1356,6 +1651,8 @@ class RecurringEventsUI:
         self.refresh_events()
 
     def _handle_close_request(self) -> None:
+        for event_id in list(self._detail_windows.keys()):
+            self._close_detail_window(event_id)
         try:
             self.server_controller.stop()
         finally:
@@ -1411,6 +1708,7 @@ class RecurringEventsUI:
             return
         self.events = data
         self._update_tag_menu()
+        self._refresh_detail_windows()
         self.update_view()
         self._configure_scroll_slider()
         self.status_var.set(f"{len(self.events)} event(s) - Refreshed at {datetime.now().strftime('%H:%M:%S')}")
@@ -1425,9 +1723,7 @@ class RecurringEventsUI:
         self.update_view()
 
     def _configure_scroll_slider(self) -> None:
-        extra_padding = ROW_HEIGHT
-        events_for_layout = self._display_events if self._display_events else self.events
-        total_height = max(0, len(events_for_layout) * ROW_HEIGHT + LIST_BASE_OFFSET + extra_padding)
+        total_height = max(self.list_canvas.content_height + ROW_SPACING, self.viewport_height)
         viewport = self.viewport_height
         max_offset = max(0, total_height - viewport)
         self.row_slider.config(to=max_offset)
@@ -1449,6 +1745,8 @@ class RecurringEventsUI:
         setting = HORIZON_SETTINGS[self.horizon_var.get()]
         view_start = date.today() + timedelta(days=int(self.timeline_offset_var.get()))
         view_end = view_start + timedelta(days=setting.span_days)
+        self.list_canvas.update_view(display_events, self.scroll_offset, self.viewport_height)
+        row_heights = [self.list_canvas.row_heights.get(event.id, ROW_HEIGHT) for event, _history in display_events]
         self.timeline_canvas.update_view(
             display_events,
             view_start,
@@ -1457,8 +1755,8 @@ class RecurringEventsUI:
             setting.label_format,
             self.scroll_offset,
             self.viewport_height,
+            row_heights,
         )
-        self.list_canvas.update_view(display_events, self.scroll_offset, self.viewport_height)
 
     def _handle_edit_from_canvas(self, event_id: int) -> None:
         event = next((evt for evt, _history in self.events if evt.id == event_id), None)
@@ -1490,6 +1788,7 @@ class RecurringEventsUI:
                 event.id,
                 name=dialog.result["name"],
                 tag=dialog.result["tag"],
+                details=dialog.result["details"],
                 due_date=dialog.result["due_date"],
                 frequency_value=dialog.result["frequency_value"],
                 frequency_unit=dialog.result["frequency_unit"],
@@ -1498,6 +1797,54 @@ class RecurringEventsUI:
             messagebox.showerror("Error", f"Failed to update event: {exc}")
             return
         self.refresh_events()
+
+    def _show_event_details(self, event_id: int) -> None:
+        data = next(((evt, history) for evt, history in self.events if evt.id == event_id), None)
+        if data is None:
+            return
+        event, history = data
+        window = self._detail_windows.get(event_id)
+        if window and window.winfo_exists():
+            window.update_content(event, history)
+            window.apply_theme(self.current_theme())
+            try:
+                window.lift()
+                window.focus_force()
+            except tk.TclError:
+                pass
+            return
+
+        def handle_close(closed_id: int) -> None:
+            self._detail_windows.pop(closed_id, None)
+
+        def handle_edit(target_id: int) -> None:
+            self._close_detail_window(target_id)
+            self._handle_edit_from_canvas(target_id)
+
+        window = EventDetailsWindow(
+            self.root,
+            event,
+            history,
+            theme_provider=self.current_theme,
+            on_edit=handle_edit,
+            on_close=handle_close,
+        )
+        self._detail_windows[event_id] = window
+
+    def _close_detail_window(self, event_id: int) -> None:
+        window = self._detail_windows.pop(event_id, None)
+        if window and window.winfo_exists():
+            window.close()
+
+    def _refresh_detail_windows(self) -> None:
+        current = {event.id: (event, history) for event, history in self.events}
+        for event_id, window in list(self._detail_windows.items()):
+            if not window.winfo_exists() or event_id not in current:
+                self._close_detail_window(event_id)
+                continue
+            event, history = current[event_id]
+            window.update_content(event, history)
+            window.apply_theme(self.current_theme())
 
     def reset_timeline_slider(self) -> None:
         self.timeline_offset_var.set(0)

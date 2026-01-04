@@ -8,7 +8,7 @@ import androidx.room.TypeConverters
 
 @Database(
     entities = [EventEntity::class, EventHistoryEntity::class, PendingChangeEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

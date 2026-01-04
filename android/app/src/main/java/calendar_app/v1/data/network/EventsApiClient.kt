@@ -47,6 +47,7 @@ class EventsApiClient(
         manualEndpoint: MdnsEndpoint?,
         name: String,
         tag: String?,
+        details: String?,
         dueDate: LocalDate,
         frequencyValue: Int,
         frequencyUnit: FrequencyUnit
@@ -58,6 +59,11 @@ class EventsApiClient(
                 put("tag", JSONObject.NULL)
             } else {
                 put("tag", tag)
+            }
+            if (details == null) {
+                put("details", JSONObject.NULL)
+            } else {
+                put("details", details)
             }
             put("due_date", dueDate.toString())
             put("frequency_value", frequencyValue)
@@ -84,6 +90,7 @@ class EventsApiClient(
         eventId: Int,
         name: String,
         tag: String?,
+        details: String?,
         dueDate: LocalDate,
         frequencyValue: Int,
         frequencyUnit: FrequencyUnit
@@ -95,6 +102,11 @@ class EventsApiClient(
                 put("tag", JSONObject.NULL)
             } else {
                 put("tag", tag)
+            }
+            if (details == null) {
+                put("details", JSONObject.NULL)
+            } else {
+                put("details", details)
             }
             put("due_date", dueDate.toString())
             put("frequency_value", frequencyValue)
@@ -179,6 +191,7 @@ class EventsApiClient(
             id = getInt("id"),
             name = getString("name"),
             tag = optStringOrNull("tag"),
+            details = optStringOrNull("details"),
             frequencyValue = getInt("frequency_value"),
             frequencyUnit = FrequencyUnit.fromApi(getString("frequency_unit")),
             dueDate = LocalDate.parse(getString("due_date")),

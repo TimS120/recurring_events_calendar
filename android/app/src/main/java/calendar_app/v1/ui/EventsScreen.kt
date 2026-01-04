@@ -23,15 +23,19 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Settings
@@ -55,6 +59,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -69,6 +74,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -108,6 +114,7 @@ fun EventsScreen(
     onApplySettings: () -> Unit,
     onEditorNameChange: (String) -> Unit,
     onEditorTagChange: (String) -> Unit,
+    onEditorDetailsChange: (String) -> Unit,
     onEditorDueDateChange: (String) -> Unit,
     onEditorFrequencyValueChange: (String) -> Unit,
     onEditorUnitChange: (FrequencyUnit) -> Unit,
@@ -141,6 +148,7 @@ fun EventsScreen(
             editor = editor,
             onNameChange = onEditorNameChange,
             onTagChange = onEditorTagChange,
+            onDetailsChange = onEditorDetailsChange,
             onDueDateChange = onEditorDueDateChange,
             onFrequencyChange = onEditorFrequencyValueChange,
             onUnitChange = onEditorUnitChange,
@@ -362,10 +370,29 @@ private fun EventsTable(
     val viewEnd = viewStart.plusDays(state.horizon.spanDays.toLong())
     val visibleEvents = state.visibleEvents
     val rowSpacing = RowSpacing
-    var rowHeight by remember { mutableStateOf(DefaultRowHeight) }
+    val eventRowHeights = remember { mutableStateMapOf<Int, Dp>() }
     val rowsCount = visibleEvents.size
-    val totalRowsHeight = if (rowsCount > 0) (rowHeight + rowSpacing) * rowsCount else 0.dp
-    val timelineHeight = maxOf(totalRowsHeight + AxisPadding, 220.dp)
+    val rowHeightsForTimeline = visibleEvents.map { eventRowHeights[it.id] ?: DefaultRowHeight }
+    val measuredHeight = rowHeightsForTimeline.fold(0.dp) { acc, value -> acc + value }
+    val spacingTotal = if (rowsCount > 1) rowSpacing * (rowsCount - 1) else 0.dp
+    val timelineHeight = maxOf(measuredHeight + spacingTotal + AxisPadding, 220.dp)
+    var detailEvent by remember { mutableStateOf<RecurringEvent?>(null) }
+
+    LaunchedEffect(visibleEvents) {
+        val ids = visibleEvents.map { it.id }.toSet()
+        eventRowHeights.entries.removeIf { (key, _) -> key !in ids }
+    }
+
+    detailEvent?.let { selected ->
+        EventDetailsDialog(
+            event = selected,
+            onDismiss = { detailEvent = null },
+            onEdit = {
+                detailEvent = null
+                onOpenEditor(selected)
+            }
+        )
+    }
     val listWidth = 320.dp
     val timelineWidth = maxOf(maxWidth - listWidth - 24.dp, 300.dp)
     val horizontalScroll = rememberScrollState()
@@ -432,21 +459,17 @@ private fun EventsTable(
             if (visibleEvents.isNotEmpty()) {
                 Spacer(Modifier.height(AxisPadding))
             }
-            visibleEvents.forEachIndexed { index, event ->
-                val measureModifier = if (index == 0) {
-                    Modifier.onSizeChanged { size ->
-                        val measuredHeight = with(density) { size.height.toDp() }
-                        if (measuredHeight > 0.dp && rowHeight != measuredHeight) {
-                            rowHeight = measuredHeight
-                        }
+            visibleEvents.forEach { event ->
+                val measureModifier = Modifier.onSizeChanged { size ->
+                    if (size.height > 0) {
+                        eventRowHeights[event.id] = with(density) { size.height.toDp() }
                     }
-                } else {
-                    Modifier
                 }
                 EventCard(
                     event = event,
                     modifier = measureModifier,
-                    onClick = { onOpenEditor(event) }
+                    onShowDetails = { detailEvent = event },
+                    onEdit = { onOpenEditor(event) }
                 )
                 Spacer(Modifier.height(rowSpacing))
             }
@@ -487,7 +510,7 @@ private fun EventsTable(
                 viewStart = viewStart,
                 viewEnd = viewEnd,
                 labelFormatter = state.horizon.tickFormatter,
-                rowHeight = rowHeight,
+                rowHeights = rowHeightsForTimeline,
                 rowSpacing = rowSpacing
             )
         }
@@ -497,17 +520,47 @@ private fun EventsTable(
 @Composable
 private fun EventCard(
     event: RecurringEvent,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onShowDetails: () -> Unit,
+    onEdit: () -> Unit
 ) {
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .clickable { onClick() },
+            .clickable { onShowDetails() },
         colors = CardDefaults.cardColors(containerColor = if (event.isOverdue) Color(0xFFFFF1F0) else Color(0xFFF6F7FB))
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            Text(event.name, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    event.name,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                if (!event.details.isNullOrBlank()) {
+                    Icon(
+                        imageVector = Icons.Filled.Info,
+                        contentDescription = "Contains extra details",
+                        tint = Color(0xFF1A73E8),
+                        modifier = Modifier
+                            .padding(start = 4.dp)
+                            .size(18.dp)
+                    )
+                }
+                IconButton(
+                    onClick = onEdit,
+                    modifier = Modifier.size(32.dp),
+                    colors = IconButtonDefaults.iconButtonColors(contentColor = Color(0xFF2C5282))
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Edit,
+                        contentDescription = "Edit event"
+                    )
+                }
+            }
             val secondaryLine = buildString {
                 append(event.cadenceText)
                 val tagText = event.tag?.trim()?.takeIf { it.isNotEmpty() }
@@ -543,7 +596,7 @@ private fun TimelineCanvas(
     viewStart: LocalDate,
     viewEnd: LocalDate,
     labelFormatter: DateTimeFormatter,
-    rowHeight: Dp,
+    rowHeights: List<Dp>,
     rowSpacing: Dp
 ) {
     if (events.isEmpty()) {
@@ -558,8 +611,9 @@ private fun TimelineCanvas(
         return
     }
     val density = LocalDensity.current
-    val rowHeightPx = with(density) { rowHeight.toPx() }
     val rowSpacingPx = with(density) { rowSpacing.toPx() }
+    val rowHeightsPx = rowHeights.map { with(density) { it.toPx() } }
+    val defaultRowHeightPx = with(density) { DefaultRowHeight.toPx() }
     Canvas(
         modifier = Modifier
             .fillMaxSize()
@@ -616,9 +670,9 @@ private fun TimelineCanvas(
             null
         }
 
-        val rowStride = rowHeightPx + rowSpacingPx
+        var rowTop = topPadding
         events.forEachIndexed { index, event ->
-            val rowTop = topPadding + index * rowStride
+            val rowHeightPx = rowHeightsPx.getOrElse(index) { defaultRowHeightPx }
             val rowBottom = rowTop + rowHeightPx
             val midY = (rowTop + rowBottom) / 2f
             drawRect(
@@ -632,6 +686,13 @@ private fun TimelineCanvas(
                 end = Offset(leftPadding + width, midY),
                 strokeWidth = 2f
             )
+            if (!event.details.isNullOrBlank()) {
+                drawCircle(
+                    color = Color(0xFF1A73E8),
+                    radius = 10f,
+                    center = Offset(leftPadding - 20f, rowTop + 20f)
+                )
+            }
 
             event.history.forEach { history ->
                 if (history.actionDate in viewStart..viewEnd) {
@@ -663,6 +724,7 @@ private fun TimelineCanvas(
                 markerDate = addFrequency(markerDate, event.frequencyValue, event.frequencyUnit)
                 iterations++
             }
+            rowTop = rowBottom + rowSpacingPx
         }
 
         if (todayX != null) {
@@ -729,6 +791,7 @@ private fun EventEditorDialog(
     editor: EventEditorState,
     onNameChange: (String) -> Unit,
     onTagChange: (String) -> Unit,
+    onDetailsChange: (String) -> Unit,
     onDueDateChange: (String) -> Unit,
     onFrequencyChange: (String) -> Unit,
     onUnitChange: (FrequencyUnit) -> Unit,
@@ -785,6 +848,15 @@ private fun EventEditorDialog(
                     suggestions = tagSuggestions
                 )
                 OutlinedTextField(
+                    value = editor.details,
+                    onValueChange = onDetailsChange,
+                    label = { Text("Additional details (optional)") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 120.dp),
+                    maxLines = 6
+                )
+                OutlinedTextField(
                     value = editor.dueDate,
                     onValueChange = onDueDateChange,
                     label = { Text("Due date (DD.MM.YYYY)") },
@@ -839,6 +911,45 @@ private fun FrequencyDropdown(
             }
         }
     }
+}
+
+@Composable
+private fun EventDetailsDialog(
+    event: RecurringEvent,
+    onDismiss: () -> Unit,
+    onEdit: () -> Unit
+) {
+    val scrollState = rememberScrollState()
+    val detailsText = event.details?.takeIf { it.isNotBlank() } ?: "No additional information provided."
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onDismiss()
+                    onEdit()
+                }
+            ) {
+                Text("Edit")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+        title = { Text(event.name, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.verticalScroll(scrollState)
+            ) {
+                Text("Next due: ${formatDisplayDate(event.dueDate)}")
+                Text(event.cadenceText)
+                val tagLabel = event.tag?.takeIf { it.isNotBlank() } ?: "No tag"
+                Text("Tag: $tagLabel")
+                Text(detailsText)
+            }
+        }
+    )
 }
 
 @Composable

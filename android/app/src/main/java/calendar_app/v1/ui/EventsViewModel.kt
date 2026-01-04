@@ -33,6 +33,7 @@ data class EventEditorState(
     val id: Int? = null,
     val name: String = "",
     val tag: String = "",
+    val details: String = "",
     val dueDate: String = formatDisplayDate(LocalDate.now()),
     val frequencyValue: String = "30",
     val frequencyUnit: FrequencyUnit = FrequencyUnit.DAYS
@@ -166,6 +167,7 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
                 id = existing.id,
                 name = existing.name,
                 tag = existing.tag.orEmpty(),
+                details = existing.details.orEmpty(),
                 dueDate = formatDisplayDate(existing.dueDate),
                 frequencyValue = existing.frequencyValue.toString(),
                 frequencyUnit = existing.frequencyUnit
@@ -177,6 +179,7 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
     fun updateEditor(
         name: String? = null,
         tag: String? = null,
+        details: String? = null,
         dueDate: String? = null,
         frequencyValue: String? = null,
         unit: FrequencyUnit? = null
@@ -187,6 +190,7 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
                 editorState = editor.copy(
                     name = name ?: editor.name,
                     tag = tag ?: editor.tag,
+                    details = details ?: editor.details,
                     dueDate = dueDate ?: editor.dueDate,
                     frequencyValue = frequencyValue ?: editor.frequencyValue,
                     frequencyUnit = unit ?: editor.frequencyUnit
@@ -198,6 +202,8 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
     fun updateEditorName(value: String) = updateEditor(name = value)
 
     fun updateEditorTag(value: String) = updateEditor(tag = value)
+
+    fun updateEditorDetails(value: String) = updateEditor(details = value)
 
     fun updateEditorDueDate(value: String) = updateEditor(dueDate = value)
 
@@ -285,6 +291,7 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
                 inputId = editor.id,
                 name = name,
                 tag = editor.tag.trim().takeIf { it.isNotEmpty() },
+                details = editor.details,
                 dueDate = dueDate,
                 frequencyValue = freqValue,
                 frequencyUnit = editor.frequencyUnit,

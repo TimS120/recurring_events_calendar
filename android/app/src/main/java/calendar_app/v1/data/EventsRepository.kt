@@ -41,6 +41,7 @@ class EventsRepository(
         inputId: Int?,
         name: String,
         tag: String?,
+        details: String?,
         dueDate: LocalDate,
         frequencyValue: Int,
         frequencyUnit: FrequencyUnit,
@@ -49,9 +50,11 @@ class EventsRepository(
         val eventId = inputId ?: generateLocalId()
         val now = System.currentTimeMillis()
         val normalizedTag = tag?.trim()?.takeIf { it.isNotEmpty() }
+        val normalizedDetails = details?.trim()?.takeIf { it.isNotEmpty() }
         val entity = eventDao.getEventById(eventId)?.copy(
             name = name,
             tag = normalizedTag,
+            details = normalizedDetails,
             dueDate = dueDate,
             frequencyValue = frequencyValue,
             frequencyUnit = frequencyUnit.apiValue,
@@ -63,6 +66,7 @@ class EventsRepository(
             id = eventId,
             name = name,
             tag = normalizedTag,
+            details = normalizedDetails,
             frequencyValue = frequencyValue,
             frequencyUnit = frequencyUnit.apiValue,
             dueDate = dueDate,
@@ -80,6 +84,11 @@ class EventsRepository(
                 put("tag", JSONObject.NULL)
             } else {
                 put("tag", normalizedTag)
+            }
+            if (normalizedDetails == null) {
+                put("details", JSONObject.NULL)
+            } else {
+                put("details", normalizedDetails)
             }
             put("due_date", dueDate.toString())
             put("frequency_value", frequencyValue)
@@ -182,10 +191,11 @@ class EventsRepository(
                 val payload = originalChange.payload?.let(::JSONObject) ?: return null
                 val name = payload.getString("name")
                 val tag = payload.optStringOrNullCompat("tag")
+                val details = payload.optStringOrNullCompat("details")
                 val dueDate = LocalDate.parse(payload.getString("due_date"))
                 val freqValue = payload.getInt("frequency_value")
                 val unit = FrequencyUnit.fromApi(payload.getString("frequency_unit"))
-                val created = apiClient.createEvent(token, manualEndpoint, name, tag, dueDate, freqValue, unit)
+                val created = apiClient.createEvent(token, manualEndpoint, name, tag, details, dueDate, freqValue, unit)
                 if (currentEventId != created.id) {
                     eventDao.replaceEventId(currentEventId, created.id)
                     eventDao.replaceHistoryEventId(currentEventId, created.id)
@@ -198,12 +208,23 @@ class EventsRepository(
                 val payload = originalChange.payload?.let(::JSONObject) ?: return null
                 val name = payload.getString("name")
                 val tag = payload.optStringOrNullCompat("tag")
+                val details = payload.optStringOrNullCompat("details")
                 val dueDate = LocalDate.parse(payload.getString("due_date"))
                 val freqValue = payload.getInt("frequency_value")
                 val unit = FrequencyUnit.fromApi(payload.getString("frequency_unit"))
                 return try {
                     val updated =
-                        apiClient.updateEvent(token, manualEndpoint, currentEventId, name, tag, dueDate, freqValue, unit)
+                        apiClient.updateEvent(
+                            token,
+                            manualEndpoint,
+                            currentEventId,
+                            name,
+                            tag,
+                            details,
+                            dueDate,
+                            freqValue,
+                            unit,
+                        )
                     persistRemoteEvent(updated)
                     null
                 } catch (ex: ApiException) {
@@ -268,6 +289,7 @@ class EventsRepository(
             id = id,
             name = name,
             tag = tag,
+            details = details,
             frequencyValue = frequencyValue,
             frequencyUnit = frequencyUnit.apiValue,
             dueDate = dueDate,

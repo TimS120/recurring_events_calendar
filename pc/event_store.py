@@ -29,6 +29,7 @@ class EventRecord:
     id: int
     name: str
     tag: Optional[str]
+    details: Optional[str]
     frequency_value: int
     frequency_unit: str
     due_date: date
@@ -89,6 +90,7 @@ def _row_to_event(row: sqlite3.Row) -> EventRecord:
         id=row["id"],
         name=row["name"],
         tag=row["tag"] if "tag" in row.keys() else None,
+        details=row["details"] if "details" in row.keys() else None,
         frequency_value=row["frequency_value"],
         frequency_unit=row["frequency_unit"],
         due_date=_parse_required_date(row["due_date"]),
@@ -118,6 +120,7 @@ def initialize_database(db_path: Path = DEFAULT_DB_PATH) -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
                 tag TEXT,
+                details TEXT,
                 frequency_value INTEGER NOT NULL CHECK (frequency_value > 0),
                 frequency_unit TEXT NOT NULL CHECK (
                     frequency_unit IN ('days','weeks','months','years')
@@ -144,6 +147,8 @@ def initialize_database(db_path: Path = DEFAULT_DB_PATH) -> None:
         columns = {row["name"] for row in conn.execute("PRAGMA table_info(events)")}
         if "tag" not in columns:
             conn.execute("ALTER TABLE events ADD COLUMN tag TEXT")
+        if "details" not in columns:
+            conn.execute("ALTER TABLE events ADD COLUMN details TEXT")
         conn.commit()
 
 
@@ -181,7 +186,7 @@ def list_events(db_path: Path = DEFAULT_DB_PATH) -> List[EventRecord]:
     with _db_lock, _connect(db_path) as conn:
         rows = conn.execute(
             """
-            SELECT id, name, tag, frequency_value, frequency_unit, due_date,
+            SELECT id, name, tag, details, frequency_value, frequency_unit, due_date,
                    last_done, created_at, updated_at
             FROM events
             ORDER BY due_date ASC, name COLLATE NOCASE ASC
@@ -194,7 +199,7 @@ def get_event(event_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[EventR
     with _db_lock, _connect(db_path) as conn:
         row = conn.execute(
             """
-            SELECT id, name, tag, frequency_value, frequency_unit, due_date,
+            SELECT id, name, tag, details, frequency_value, frequency_unit, due_date,
                    last_done, created_at, updated_at
             FROM events
             WHERE id = ?
@@ -207,6 +212,7 @@ def get_event(event_id: int, db_path: Path = DEFAULT_DB_PATH) -> Optional[EventR
 def create_event(
     name: str,
     tag: Optional[str],
+    details: Optional[str],
     due_date: date,
     frequency_value: int,
     frequency_unit: str,
@@ -219,14 +225,15 @@ def create_event(
         cur = conn.execute(
             """
             INSERT INTO events (
-                name, tag, frequency_value, frequency_unit, due_date,
+                name, tag, details, frequency_value, frequency_unit, due_date,
                 last_done, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 name.strip(),
                 tag.strip() if tag and tag.strip() else None,
+                details.strip() if details and details.strip() else None,
                 frequency_value,
                 frequency_unit,
                 due_date.strftime(DATE_FMT),
@@ -248,6 +255,7 @@ def update_event(
     *,
     name: Optional[str] = None,
     tag: Optional[str] = None,
+    details: Optional[str] = None,
     due_date: Optional[date] = None,
     frequency_value: Optional[int] = None,
     frequency_unit: Optional[str] = None,
@@ -266,6 +274,10 @@ def update_event(
         fields.append("tag = ?")
         cleaned = tag.strip()
         values.append(cleaned if cleaned else None)
+    if details is not None:
+        fields.append("details = ?")
+        cleaned_details = details.strip()
+        values.append(cleaned_details if cleaned_details else None)
     if due_date is not None:
         fields.append("due_date = ?")
         values.append(due_date.strftime(DATE_FMT))

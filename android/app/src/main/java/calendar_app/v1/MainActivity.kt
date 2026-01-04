@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
                     onApplySettings = viewModel::useSettingsDefaults,
                     onEditorNameChange = viewModel::updateEditorName,
                     onEditorTagChange = viewModel::updateEditorTag,
+                    onEditorDetailsChange = viewModel::updateEditorDetails,
                     onEditorDueDateChange = viewModel::updateEditorDueDate,
                     onEditorFrequencyValueChange = viewModel::updateEditorFrequencyValue,
                     onEditorUnitChange = viewModel::updateEditorUnit,
