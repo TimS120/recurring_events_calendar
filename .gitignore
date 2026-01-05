@@ -66,13 +66,9 @@ marimo/_lsp/
 __marimo__/
 
 # -------------------------------------------------------------
-# Project-specific data we do not want to ship
+# Project-specific data
 # -------------------------------------------------------------
-pc/server_id.txt
-pc/token.txt
-pc/shared_state.db
-pc/events.db
-
+pc/data_files/
 # -------------------------------------------------------------
 # Android / mobile build artifacts
 # -------------------------------------------------------------
@@ -96,4 +92,3 @@ android/**/*.keystore
 
 # Gradle wrapper internals generated on demand
 .gradle/
-

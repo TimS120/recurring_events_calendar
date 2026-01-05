@@ -1,19 +1,10 @@
-from __future__ import annotations
-
-"""
-Backward-compatible shim that re-exports the data layer API.
-
-Legacy modules import from ``event_store`` directly, so this module simply
-re-exports the real implementations from ``data``.
-"""
-
-from data import (  # noqa: F401
+from .models import EventRecord, HistoryRecord
+from .store import (
+    DATA_DIR,
     DATE_FMT,
     DEFAULT_DB_PATH,
     FREQUENCY_UNITS,
     TS_FMT,
-    EventRecord,
-    HistoryRecord,
     add_frequency,
     create_event,
     delete_event,
@@ -28,12 +19,13 @@ from data import (  # noqa: F401
 )
 
 __all__ = [
+    "EventRecord",
+    "HistoryRecord",
+    "DATA_DIR",
     "DATE_FMT",
     "DEFAULT_DB_PATH",
     "FREQUENCY_UNITS",
     "TS_FMT",
-    "EventRecord",
-    "HistoryRecord",
     "add_frequency",
     "create_event",
     "delete_event",

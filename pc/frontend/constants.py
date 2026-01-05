@@ -1,0 +1,21 @@
+VISIBLE_ROWS = 6
+ROW_HEIGHT = 90
+ROW_BASE_OFFSET = 70
+LIST_BASE_OFFSET = 42
+ROW_SPACING = 12
+DELETE_SENTINEL_KEY = "__delete__"
+MARK_DONE_SENTINEL_KEY = "__mark_done__"
+TAG_PRIORITY_ALL = "All tags"
+
+FREQUENCY_UNIT_DAY_MAP = {
+    "days": 1,
+    "weeks": 7,
+    "months": 30,
+    "years": 365,
+}
+
+SERVER_BIND_HOST = "0.0.0.0"
+SERVER_PROBE_HOST = "127.0.0.1"
+SERVER_START_TIMEOUT = 15.0
+
+DISPLAY_DATE_FMT = "%d.%m.%Y"
