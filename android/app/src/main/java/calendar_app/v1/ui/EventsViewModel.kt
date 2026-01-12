@@ -271,6 +271,31 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun markDueToday(eventId: Int) {
+        val event = uiState.value.events.firstOrNull { it.id == eventId } ?: run {
+            _uiState.update { it.copy(errorMessage = "Event not found.") }
+            return
+        }
+        viewModelScope.launch {
+            repository.saveEventLocally(
+                inputId = event.id,
+                name = event.name,
+                tag = event.tag,
+                details = event.details,
+                dueDate = LocalDate.now(),
+                frequencyValue = event.frequencyValue,
+                frequencyUnit = event.frequencyUnit,
+                generateLocalId = { prefs.nextLocalEventId() }
+            )
+            _uiState.update {
+                it.copy(
+                    statusMessage = "Due date set to today locally. Sync to push updates.",
+                    errorMessage = null
+                )
+            }
+        }
+    }
+
     fun submitEditor() {
         val editor = uiState.value.editorState ?: return
         val name = editor.name.trim()

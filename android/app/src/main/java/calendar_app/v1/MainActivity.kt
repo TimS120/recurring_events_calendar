@@ -41,6 +41,7 @@ class MainActivity : ComponentActivity() {
                     onSync = viewModel::syncNow,
                     onOpenEditor = viewModel::openEditor,
                     onMarkDone = viewModel::markDone,
+                    onMarkDueToday = viewModel::markDueToday,
                     onDeleteEvent = viewModel::deleteEvent,
                     onToggleSettings = viewModel::toggleSettings,
                     onTokenChange = viewModel::updateToken,

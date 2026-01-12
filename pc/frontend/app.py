@@ -19,6 +19,7 @@ from data import (
 
 from .constants import (
     DELETE_SENTINEL_KEY,
+    DUE_TODAY_SENTINEL_KEY,
     MARK_DONE_SENTINEL_KEY,
     ROW_HEIGHT,
     ROW_SPACING,
@@ -449,6 +450,14 @@ class RecurringEventsUI:
                     delete_event(event.id)
                 except Exception as exc:  # noqa: BLE001
                     messagebox.showerror("Error", f"Failed to delete event: {exc}")
+                    return
+                self.refresh_events()
+                return
+            if dialog.result.get(DUE_TODAY_SENTINEL_KEY):
+                try:
+                    update_event(event.id, due_date=date.today())
+                except Exception as exc:  # noqa: BLE001
+                    messagebox.showerror("Error", f"Failed to update due date: {exc}")
                     return
                 self.refresh_events()
                 return

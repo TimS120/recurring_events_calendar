@@ -106,6 +106,7 @@ fun EventsScreen(
     onSync: () -> Unit,
     onOpenEditor: (RecurringEvent?) -> Unit,
     onMarkDone: (Int) -> Unit,
+    onMarkDueToday: (Int) -> Unit,
     onDeleteEvent: (Int) -> Unit,
     onToggleSettings: (Boolean) -> Unit,
     onTokenChange: (String) -> Unit,
@@ -164,6 +165,12 @@ fun EventsScreen(
             onMarkDone = editor.id?.let { id ->
                 {
                     onMarkDone(id)
+                    onCloseEditor()
+                }
+            },
+            onMarkDueToday = editor.id?.let { id ->
+                {
+                    onMarkDueToday(id)
                     onCloseEditor()
                 }
             }
@@ -799,7 +806,8 @@ private fun EventEditorDialog(
     onDismiss: () -> Unit,
     tagSuggestions: List<String>,
     onDelete: (() -> Unit)?,
-    onMarkDone: (() -> Unit)? = null
+    onMarkDone: (() -> Unit)? = null,
+    onMarkDueToday: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val pickDate = remember(context, editor.dueDate) {
@@ -826,6 +834,9 @@ private fun EventEditorDialog(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 onMarkDone?.let {
                     TextButton(onClick = it) { Text("Done today") }
+                }
+                onMarkDueToday?.let {
+                    TextButton(onClick = it) { Text("Due today") }
                 }
                 onDelete?.let {
                     TextButton(onClick = it) { Text("Delete") }

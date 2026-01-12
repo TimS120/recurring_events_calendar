@@ -8,7 +8,7 @@ from tkinter import messagebox, simpledialog, ttk
 
 from data import EventRecord, FREQUENCY_UNITS, HistoryRecord
 
-from .constants import DELETE_SENTINEL_KEY, MARK_DONE_SENTINEL_KEY
+from .constants import DELETE_SENTINEL_KEY, DUE_TODAY_SENTINEL_KEY, MARK_DONE_SENTINEL_KEY
 from .theme import LIGHT_THEME, ThemePalette, set_windows_titlebar_theme
 from .utils import format_display_date, parse_display_date
 from .widgets.calendar_popup import CalendarPopup
@@ -150,6 +150,8 @@ class EventDialog(simpledialog.Dialog):
         save_btn = ttk.Button(box, text="Save", width=10, command=self.ok)
         save_btn.pack(side="left", padx=5, pady=5)
         if self.event is not None:
+            due_today_btn = ttk.Button(box, text="Due today", width=12, command=self._mark_due_today)
+            due_today_btn.pack(side="left", padx=5, pady=5)
             done_btn = ttk.Button(box, text="Done today", width=12, command=self._mark_done)
             done_btn.pack(side="left", padx=5, pady=5)
         if self.event is not None:
@@ -173,6 +175,13 @@ class EventDialog(simpledialog.Dialog):
         if self.event is None:
             return
         self.result = {MARK_DONE_SENTINEL_KEY: True}
+        self.destroy()
+        self._hide_tag_popup()
+
+    def _mark_due_today(self) -> None:
+        if self.event is None:
+            return
+        self.result = {DUE_TODAY_SENTINEL_KEY: True}
         self.destroy()
         self._hide_tag_popup()
 
