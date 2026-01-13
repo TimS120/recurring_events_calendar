@@ -239,7 +239,7 @@ private fun MdnsEndpoint.buildUrl(relative: String): String {
     val normalizedBase = path.trimEnd('/')
     val normalizedRelative = if (relative.startsWith("/")) relative else "/$relative"
     val finalPath = if (normalizedBase.isBlank()) normalizedRelative else "$normalizedBase$normalizedRelative"
-    return "http://$host:$port$finalPath"
+    return "${scheme.lowercase()}://$host:$port$finalPath"
 }
 
 private fun JSONObject.asJson() = toString().toRequestBody("application/json; charset=utf-8".toMediaType())

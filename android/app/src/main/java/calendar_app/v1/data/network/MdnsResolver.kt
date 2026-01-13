@@ -12,6 +12,7 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 data class MdnsEndpoint(
+    val scheme: String,
     val host: String,
     val port: Int,
     val path: String
@@ -114,6 +115,7 @@ private fun NsdServiceInfo.toEndpoint(): MdnsEndpoint {
     } ?: emptyMap()
     val path = txtRecords["path"].orEmpty().ifBlank { "/api" }
     return MdnsEndpoint(
+        scheme = "http",
         host = hostAddress,
         port = port,
         path = path

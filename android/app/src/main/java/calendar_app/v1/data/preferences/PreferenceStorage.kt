@@ -30,6 +30,12 @@ class PreferenceStorage(context: Context) {
             prefs.edit().putString(KEY_MANUAL_HOST, value.trim()).apply()
         }
 
+    var serverUrl: String
+        get() = prefs.getString(KEY_SERVER_URL, "") ?: ""
+        set(value) {
+            prefs.edit().putString(KEY_SERVER_URL, value.trim()).apply()
+        }
+
     var manualPort: Int
         get() = prefs.getInt(KEY_MANUAL_PORT, 8000)
         set(value) {
@@ -49,6 +55,7 @@ class PreferenceStorage(context: Context) {
         private const val KEY_TOKEN = "token"
         private const val KEY_SOURCE_ID = "source_id"
         private const val KEY_MANUAL_HOST = "manual_host"
+        private const val KEY_SERVER_URL = "server_url"
         private const val KEY_MANUAL_PORT = "manual_port"
         private const val KEY_NEXT_LOCAL_EVENT_ID = "next_local_event_id"
     }

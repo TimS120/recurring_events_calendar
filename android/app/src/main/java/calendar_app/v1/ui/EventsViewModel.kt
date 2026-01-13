@@ -22,9 +22,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.time.LocalDate
+import java.net.URI
 
 data class SettingsUiState(
     val token: String = "",
+    val serverUrl: String = "",
     val manualHost: String = "",
     val manualPort: String = "8000"
 )
@@ -89,6 +91,7 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
         EventsScreenState(
             settings = SettingsUiState(
                 token = prefs.token,
+                serverUrl = prefs.serverUrl,
                 manualHost = prefs.manualHost,
                 manualPort = prefs.manualPort.toString()
             )
@@ -150,6 +153,13 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
         prefs.manualHost = value
         _uiState.update {
             it.copy(settings = it.settings.copy(manualHost = value))
+        }
+    }
+
+    fun updateServerUrl(value: String) {
+        prefs.serverUrl = value
+        _uiState.update {
+            it.copy(settings = it.settings.copy(serverUrl = value))
         }
     }
 
@@ -332,14 +342,28 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun useSettingsDefaults() {
-        val port = uiState.value.settings.manualPort.trim().ifEmpty { "8000" }.toIntOrNull() ?: run {
-            _uiState.update { it.copy(errorMessage = "Manual port must be numeric.") }
-            return
+        val serverUrl = uiState.value.settings.serverUrl.trim()
+        val resolvedPort: Int
+        if (serverUrl.isNotEmpty()) {
+            val endpoint = parseServerUrl(serverUrl) ?: run {
+                _uiState.update { it.copy(errorMessage = "Server URL must be a valid http(s) URL.") }
+                return
+            }
+            prefs.serverUrl = serverUrl
+            prefs.manualPort = endpoint.port
+            resolvedPort = endpoint.port
+        } else {
+            val port = uiState.value.settings.manualPort.trim().ifEmpty { "8000" }.toIntOrNull() ?: run {
+                _uiState.update { it.copy(errorMessage = "Manual port must be numeric.") }
+                return
+            }
+            prefs.serverUrl = ""
+            prefs.manualPort = port
+            resolvedPort = port
         }
-        prefs.manualPort = port
         _uiState.update {
             it.copy(
-                settings = it.settings.copy(manualPort = port.toString()),
+                settings = it.settings.copy(manualPort = resolvedPort.toString(), serverUrl = serverUrl),
                 showSettings = false,
                 statusMessage = "Settings updated."
             )
@@ -370,10 +394,28 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private fun manualEndpointOrNull(): MdnsEndpoint? {
+        val urlEndpoint = serverUrlEndpointOrNull()
+        if (urlEndpoint != null) return urlEndpoint
         val host = uiState.value.settings.manualHost.trim()
         if (host.isEmpty()) return null
         val port = uiState.value.settings.manualPort.trim().ifEmpty { "8000" }.toIntOrNull() ?: return null
-        return MdnsEndpoint(host = host, port = port, path = "/api")
+        return MdnsEndpoint(scheme = "http", host = host, port = port, path = "/api")
+    }
+
+    private fun serverUrlEndpointOrNull(): MdnsEndpoint? {
+        val raw = uiState.value.settings.serverUrl.trim()
+        if (raw.isEmpty()) return null
+        return parseServerUrl(raw)
+    }
+
+    private fun parseServerUrl(raw: String): MdnsEndpoint? {
+        val uri = runCatching { URI(raw) }.getOrNull() ?: return null
+        val scheme = uri.scheme?.lowercase() ?: return null
+        if (scheme != "http" && scheme != "https") return null
+        val host = uri.host ?: return null
+        val port = if (uri.port != -1) uri.port else if (scheme == "https") 443 else 80
+        val path = uri.path?.takeIf { it.isNotBlank() && it != "/" } ?: "/api"
+        return MdnsEndpoint(scheme = scheme, host = host, port = port, path = path)
     }
 
     private fun Throwable.humanMessage(fallback: String): String {

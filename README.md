@@ -9,31 +9,24 @@ Cross-platform playground for planning recurring chores and reminders. The PC si
 - Python 3.11+
 - `pip install -r pc/requirements.txt`
 
-### Running the server
-
-```bash
-cd pc
-python server.py
-```
 
 On first launch the server:
 
 - Creates `events.db` with `events` + `event_history` tables.
 - Generates `token.txt` with a random bearer token (printed to the console).
 - Generates `server_id.txt` (used by health/mDNS).
-- Starts FastAPI on `0.0.0.0:8000`.
-- Advertises an mDNS service `_recurringevents._tcp.local` so Android devices on the same WLAN can discover it.
 
-Keep TCP 8000 open on your private-network firewall profile so phones on the network can reach the API.
+### Running the UI
+  1. Start the PC app (pc/py_ui.py)
+  2. In another terminal run:
+  - cloudflared tunnel --url http://localhost:8000
+  3. Copy the https://...trycloudflare.com URL
+  4. In the Android app Settings:
+  - Set “Server URL” to that URL (e.g. https://random.trycloudflare.com)
+  - Keep the bearer token the same as the PC prints
+  - Tap Apply
+  5. Sync on both devices
 
-### Running the timeline UI
-
-In another terminal:
-
-```bash
-cd pc
-python py_ui.py
-```
 
 Features:
 

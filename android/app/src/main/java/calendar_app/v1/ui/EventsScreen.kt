@@ -110,6 +110,7 @@ fun EventsScreen(
     onDeleteEvent: (Int) -> Unit,
     onToggleSettings: (Boolean) -> Unit,
     onTokenChange: (String) -> Unit,
+    onServerUrlChange: (String) -> Unit,
     onManualHostChange: (String) -> Unit,
     onManualPortChange: (String) -> Unit,
     onApplySettings: () -> Unit,
@@ -134,6 +135,7 @@ fun EventsScreen(
             SettingsSheet(
                 state = state,
                 onTokenChange = onTokenChange,
+                onServerUrlChange = onServerUrlChange,
                 onHostChange = onManualHostChange,
                 onPortChange = onManualPortChange,
                 onApply = {
@@ -759,6 +761,7 @@ private fun TimelineCanvas(
 private fun SettingsSheet(
     state: EventsScreenState,
     onTokenChange: (String) -> Unit,
+    onServerUrlChange: (String) -> Unit,
     onHostChange: (String) -> Unit,
     onPortChange: (String) -> Unit,
     onApply: () -> Unit
@@ -769,6 +772,12 @@ private fun SettingsSheet(
             value = state.settings.token,
             onValueChange = onTokenChange,
             label = { Text("Bearer token") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = state.settings.serverUrl,
+            onValueChange = onServerUrlChange,
+            label = { Text("Server URL (optional)") },
             modifier = Modifier.fillMaxWidth()
         )
         OutlinedTextField(
@@ -784,7 +793,7 @@ private fun SettingsSheet(
             modifier = Modifier.fillMaxWidth()
         )
         Text(
-            "Leave host empty to auto-discover `_recurringevents._tcp` on your network.",
+            "If Server URL is set, manual host/port are ignored. Leave host empty to auto-discover `_recurringevents._tcp`.",
             style = MaterialTheme.typography.bodySmall
         )
         Button(onClick = onApply, modifier = Modifier.align(Alignment.End)) {

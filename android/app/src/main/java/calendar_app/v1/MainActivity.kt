@@ -45,6 +45,7 @@ class MainActivity : ComponentActivity() {
                     onDeleteEvent = viewModel::deleteEvent,
                     onToggleSettings = viewModel::toggleSettings,
                     onTokenChange = viewModel::updateToken,
+                    onServerUrlChange = viewModel::updateServerUrl,
                     onManualHostChange = viewModel::updateManualHost,
                     onManualPortChange = viewModel::updateManualPort,
                     onApplySettings = viewModel::useSettingsDefaults,
