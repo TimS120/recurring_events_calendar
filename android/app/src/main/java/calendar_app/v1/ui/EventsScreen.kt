@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 
 package calendar_app.v1.ui
 
@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -837,10 +839,14 @@ private fun EventEditorDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("Save") }
         },
         dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                TextButton(onClick = onConfirm) { Text("Save") }
                 onMarkDone?.let {
                     TextButton(onClick = it) { Text("Done today") }
                 }
@@ -855,7 +861,11 @@ private fun EventEditorDialog(
         },
         title = { Text(if (editor.id == null) "New Event" else "Edit Event") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            val scrollState = rememberScrollState()
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.verticalScroll(scrollState)
+            ) {
                 OutlinedTextField(
                     value = editor.name,
                     onValueChange = onNameChange,
@@ -866,15 +876,6 @@ private fun EventEditorDialog(
                     value = editor.tag,
                     onValueChange = onTagChange,
                     suggestions = tagSuggestions
-                )
-                OutlinedTextField(
-                    value = editor.details,
-                    onValueChange = onDetailsChange,
-                    label = { Text("Additional details (optional)") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 120.dp),
-                    maxLines = 6
                 )
                 OutlinedTextField(
                     value = editor.dueDate,
@@ -900,6 +901,15 @@ private fun EventEditorDialog(
                     selected = editor.frequencyUnit,
                     onSelected = onUnitChange
                 )
+                OutlinedTextField(
+                    value = editor.details,
+                    onValueChange = onDetailsChange,
+                    label = { Text("Additional details (optional)") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 120.dp),
+                    maxLines = 6
+                )
             }
         }
     )
@@ -911,9 +921,12 @@ private fun FrequencyDropdown(
     onSelected: (FrequencyUnit) -> Unit
 ) {
     val expanded = remember { mutableStateOf(false) }
-    Column {
+    Column(modifier = Modifier.fillMaxWidth()) {
         Text("Frequency unit", fontWeight = FontWeight.Medium)
-        Button(onClick = { expanded.value = true }) {
+        Button(
+            onClick = { expanded.value = true },
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Text(selected.apiValue)
         }
         DropdownMenu(
