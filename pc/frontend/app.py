@@ -306,7 +306,7 @@ class RecurringEventsUI:
 
     def _bind_scroll_events(self) -> None:
         self.root.bind_all("<MouseWheel>", self._on_mouse_wheel)
-        self.root.bind_all("<Control-MouseWheel>", self._on_mouse_wheel)
+        self.root.bind_all("<Shift-MouseWheel>", self._on_mouse_wheel)
         self.root.bind_all("<Button-4>", lambda event: self._on_mouse_wheel(event, delta_override=120))
         self.root.bind_all("<Button-5>", lambda event: self._on_mouse_wheel(event, delta_override=-120))
 
@@ -345,8 +345,8 @@ class RecurringEventsUI:
         delta = delta_override if delta_override is not None else getattr(event, "delta", 0)
         if delta == 0:
             return
-        ctrl_pressed = bool(getattr(event, "state", 0) & 0x0004)
-        if ctrl_pressed:
+        shift_pressed = bool(getattr(event, "state", 0) & 0x0001)
+        if shift_pressed:
             step = self._timeline_scroll_step()
             change = -int(delta / 120 * step)
             if change == 0:
