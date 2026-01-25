@@ -243,16 +243,6 @@ class TimelineCanvas(tk.Canvas):
         self.config(scrollregion=(0, 0, width, height))
 
         self.create_rectangle(0, 0, width, height, fill=theme.timeline_backdrop, outline="")
-        self.create_text(
-            margin,
-            15,
-            text=f"{self.horizon_name} horizon",
-            font=("Segoe UI", 11, "bold"),
-            anchor="w",
-            fill=theme.text_primary,
-        )
-        self.create_line(margin, axis_y, width - margin, axis_y, fill=theme.timeline_axis, width=2)
-
         def date_to_x(value: date) -> float:
             delta = (value - self.view_start).days
             fraction = delta / span_days
@@ -260,18 +250,29 @@ class TimelineCanvas(tk.Canvas):
             return margin + max(0, min(usable_width, fraction * usable_width))
 
         tick_step = max(1, span_days // 8)
-        tick_date = self.view_start
-        while tick_date <= self.view_end:
-            x = date_to_x(tick_date)
-            self.create_line(x, axis_y - 5, x, axis_y + 5, fill=theme.timeline_axis_text)
+
+        def draw_axis_elements() -> None:
             self.create_text(
-                x,
-                axis_y - 12,
-                text=tick_date.strftime(self.label_format),
-                font=("Segoe UI", 8),
-                fill=theme.timeline_axis_text,
+                margin,
+                15,
+                text=f"{self.horizon_name} horizon",
+                font=("Segoe UI", 11, "bold"),
+                anchor="w",
+                fill=theme.text_primary,
             )
-            tick_date += timedelta(days=tick_step)
+            self.create_line(margin, axis_y, width - margin, axis_y, fill=theme.timeline_axis, width=2)
+            tick_date = self.view_start
+            while tick_date <= self.view_end:
+                x = date_to_x(tick_date)
+                self.create_line(x, axis_y - 5, x, axis_y + 5, fill=theme.timeline_axis_text)
+                self.create_text(
+                    x,
+                    axis_y - 12,
+                    text=tick_date.strftime(self.label_format),
+                    font=("Segoe UI", 8),
+                    fill=theme.timeline_axis_text,
+                )
+                tick_date += timedelta(days=tick_step)
 
         today_line_x: Optional[float] = None
         if self.view_start <= today <= self.view_end:
@@ -288,6 +289,7 @@ class TimelineCanvas(tk.Canvas):
                 fill=theme.placeholder_text,
                 justify="center",
             )
+            draw_axis_elements()
             return
 
         y_offset = 0.0
@@ -339,6 +341,8 @@ class TimelineCanvas(tk.Canvas):
                 iterations += 1
 
             y_offset += row_height + row_spacing
+
+        draw_axis_elements()
 
         if today_line_x is not None:
             self.create_line(today_line_x, axis_y, today_line_x, height, dash=(4, 4), fill=theme.today_color, width=2)
