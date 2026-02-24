@@ -55,7 +55,8 @@ fun EventWithHistoryEntity.toModel(): RecurringEvent =
         frequencyUnit = FrequencyUnit.fromApi(event.frequencyUnit),
         dueDate = event.dueDate,
         lastDone = event.lastDone,
-        isOverdue = event.isOverdue,
+        // Recompute from due date so overdue styling stays correct even when offline.
+        isOverdue = !event.dueDate.isAfter(LocalDate.now()),
         history = history.map {
             EventHistory(
                 id = it.remoteId ?: -it.localId.absoluteValue.toInt(),
