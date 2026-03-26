@@ -108,6 +108,7 @@ fun EventsScreen(
     onSync: () -> Unit,
     onOpenEditor: (RecurringEvent?) -> Unit,
     onMarkDone: (Int) -> Unit,
+    onMarkDonePast: (Int, LocalDate) -> Unit,
     onMarkDueToday: (Int) -> Unit,
     onDeleteEvent: (Int) -> Unit,
     onToggleSettings: (Boolean) -> Unit,
@@ -169,6 +170,12 @@ fun EventsScreen(
             onMarkDone = editor.id?.let { id ->
                 {
                     onMarkDone(id)
+                    onCloseEditor()
+                }
+            },
+            onMarkDonePast = editor.id?.let { id ->
+                { doneDate ->
+                    onMarkDonePast(id, doneDate)
                     onCloseEditor()
                 }
             },
@@ -818,6 +825,7 @@ private fun EventEditorDialog(
     tagSuggestions: List<String>,
     onDelete: (() -> Unit)?,
     onMarkDone: (() -> Unit)? = null,
+    onMarkDonePast: ((LocalDate) -> Unit)? = null,
     onMarkDueToday: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -836,6 +844,25 @@ private fun EventEditorDialog(
             ).show()
         }
     }
+    val pickDonePastDate = remember(context) {
+        {
+            val today = LocalDate.now()
+            DatePickerDialog(
+                context,
+                { _, year, month, dayOfMonth ->
+                    val selected = LocalDate.of(year, month + 1, dayOfMonth)
+                    if (!selected.isAfter(today)) {
+                        onMarkDonePast?.invoke(selected)
+                    }
+                },
+                today.year,
+                today.monthValue - 1,
+                today.dayOfMonth
+            ).apply {
+                datePicker.maxDate = System.currentTimeMillis()
+            }.show()
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
@@ -849,6 +876,9 @@ private fun EventEditorDialog(
                 TextButton(onClick = onConfirm) { Text("Save") }
                 onMarkDone?.let {
                     TextButton(onClick = it) { Text("Done today") }
+                }
+                onMarkDonePast?.let {
+                    TextButton(onClick = pickDonePastDate) { Text("Done past") }
                 }
                 onMarkDueToday?.let {
                     TextButton(onClick = it) { Text("Due today") }

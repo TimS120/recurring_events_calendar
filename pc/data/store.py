@@ -324,6 +324,8 @@ def mark_event_done(
     if event is None:
         raise ValueError(f"Event {event_id} does not exist")
     done = done_date or date.today()
+    if done > date.today():
+        raise ValueError("Completion date cannot be in the future")
     new_due = add_frequency(done, event.frequency_value, event.frequency_unit)
     now = _utcnow()
     with _db_lock, _connect(db_path) as conn:

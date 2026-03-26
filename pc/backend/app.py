@@ -186,7 +186,9 @@ async def complete_event_api(event_id: int, payload: EventCompletionRequest | No
     try:
         record = mark_event_done(event_id, done_date=payload.done_date if payload else None)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        detail = str(exc)
+        code = status.HTTP_404_NOT_FOUND if "does not exist" in detail else status.HTTP_400_BAD_REQUEST
+        raise HTTPException(status_code=code, detail=detail) from exc
     history = list_event_history(event_id, limit=5)
     return event_to_response(record, history)
 

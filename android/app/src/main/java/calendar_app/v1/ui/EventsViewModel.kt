@@ -270,11 +270,33 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun markDone(eventId: Int) {
-        viewModelScope.launch {
-            repository.markDoneLocally(eventId)
+        markDone(eventId, LocalDate.now())
+    }
+
+    fun markDonePast(eventId: Int, doneDate: LocalDate) {
+        if (doneDate.isAfter(LocalDate.now())) {
             _uiState.update {
                 it.copy(
-                    statusMessage = "Marked as done locally. Run sync to push updates.",
+                    errorMessage = "Done past date must be today or earlier.",
+                    statusMessage = null
+                )
+            }
+            return
+        }
+        markDone(eventId, doneDate)
+    }
+
+    private fun markDone(eventId: Int, doneDate: LocalDate) {
+        viewModelScope.launch {
+            repository.markDoneLocally(eventId, doneDate)
+            val status = if (doneDate == LocalDate.now()) {
+                "Marked as done locally. Run sync to push updates."
+            } else {
+                "Marked as done for ${formatDisplayDate(doneDate)} locally. Run sync to push updates."
+            }
+            _uiState.update {
+                it.copy(
+                    statusMessage = status,
                     errorMessage = null
                 )
             }

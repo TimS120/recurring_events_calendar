@@ -20,6 +20,7 @@ from data import (
 from .constants import (
     DELETE_SENTINEL_KEY,
     DUE_TODAY_SENTINEL_KEY,
+    MARK_DONE_DATE_KEY,
     MARK_DONE_SENTINEL_KEY,
     ROW_HEIGHT,
     ROW_SPACING,
@@ -462,7 +463,8 @@ class RecurringEventsUI:
                 self.refresh_events()
                 return
             if dialog.result.get(MARK_DONE_SENTINEL_KEY):
-                self.complete_event(event.id)
+                done_date = dialog.result.get(MARK_DONE_DATE_KEY)
+                self.complete_event(event.id, done_date=done_date)
                 return
         try:
             update_event(
@@ -563,9 +565,9 @@ class RecurringEventsUI:
             self.timeline_offset_var.set(int(new_value))
             self.update_view()
 
-    def complete_event(self, event_id: int) -> None:
+    def complete_event(self, event_id: int, done_date: Optional[date] = None) -> None:
         try:
-            mark_event_done(event_id)
+            mark_event_done(event_id, done_date=done_date)
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Error", f"Failed to mark as done: {exc}")
             return

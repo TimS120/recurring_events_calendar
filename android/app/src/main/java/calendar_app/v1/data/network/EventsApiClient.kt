@@ -150,13 +150,19 @@ class EventsApiClient(
     suspend fun markDone(
         token: String,
         manualEndpoint: MdnsEndpoint?,
-        eventId: Int
+        eventId: Int,
+        doneDate: LocalDate? = null
     ): RecurringEvent = withContext(Dispatchers.IO) {
         val endpoint = resolveEndpoint(manualEndpoint)
+        val body = JSONObject().apply {
+            if (doneDate != null) {
+                put("done_date", doneDate.toString())
+            }
+        }
         val request = Request.Builder()
             .url(endpoint.buildUrl("/events/$eventId/complete"))
             .addToken(token)
-            .post("{}".toRequestBody(JSON))
+            .post(body.asJson())
             .build()
 
         httpClient.newCall(request).execute().use { response ->

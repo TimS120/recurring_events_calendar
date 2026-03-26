@@ -8,7 +8,12 @@ from tkinter import messagebox, simpledialog, ttk
 
 from data import EventRecord, FREQUENCY_UNITS, HistoryRecord
 
-from .constants import DELETE_SENTINEL_KEY, DUE_TODAY_SENTINEL_KEY, MARK_DONE_SENTINEL_KEY
+from .constants import (
+    DELETE_SENTINEL_KEY,
+    DUE_TODAY_SENTINEL_KEY,
+    MARK_DONE_DATE_KEY,
+    MARK_DONE_SENTINEL_KEY,
+)
 from .theme import LIGHT_THEME, ThemePalette, set_windows_titlebar_theme
 from .utils import format_display_date, parse_display_date
 from .widgets.calendar_popup import CalendarPopup
@@ -34,7 +39,9 @@ class EventDialog(simpledialog.Dialog):
         self._tag_popup_listbox: Optional[tk.Listbox] = None
         self.due_entry: Optional[ttk.Entry] = None
         self._date_picker: Optional[CalendarPopup] = None
+        self._done_past_picker: Optional[CalendarPopup] = None
         self._due_trigger_btn: Optional[ttk.Button] = None
+        self._done_past_btn: Optional[ttk.Button] = None
         self.details_input: Optional[tk.Text] = None
         super().__init__(master, title)
 
@@ -154,6 +161,8 @@ class EventDialog(simpledialog.Dialog):
             due_today_btn.pack(side="left", padx=5, pady=5)
             done_btn = ttk.Button(box, text="Done today", width=12, command=self._mark_done)
             done_btn.pack(side="left", padx=5, pady=5)
+            self._done_past_btn = ttk.Button(box, text="Done past", width=12, command=self._mark_done_past)
+            self._done_past_btn.pack(side="left", padx=5, pady=5)
         if self.event is not None:
             delete_btn = ttk.Button(box, text="Delete", width=10, command=self._delete_event)
             delete_btn.pack(side="left", padx=5, pady=5)
@@ -177,6 +186,35 @@ class EventDialog(simpledialog.Dialog):
         self.result = {MARK_DONE_SENTINEL_KEY: True}
         self.destroy()
         self._hide_tag_popup()
+
+    def _mark_done_past(self) -> None:
+        if self.event is None:
+            return
+        if self._done_past_picker is not None:
+            self._done_past_picker.close()
+        base_date = self.event.last_done or date.today()
+        if base_date > date.today():
+            base_date = date.today()
+        self._done_past_picker = CalendarPopup(
+            self,
+            base_date,
+            self._handle_done_past_selection,
+            on_close=self._handle_done_past_picker_closed,
+            theme_provider=self.theme_provider,
+            anchor_widget=self._done_past_btn,
+        )
+
+    def _handle_done_past_selection(self, value: date) -> None:
+        if value > date.today():
+            messagebox.showerror("Invalid date", "Done past date must be today or earlier.")
+            return
+        self._done_past_picker = None
+        self.result = {MARK_DONE_SENTINEL_KEY: True, MARK_DONE_DATE_KEY: value}
+        self.destroy()
+        self._hide_tag_popup()
+
+    def _handle_done_past_picker_closed(self) -> None:
+        self._done_past_picker = None
 
     def _mark_due_today(self) -> None:
         if self.event is None:
@@ -224,6 +262,12 @@ class EventDialog(simpledialog.Dialog):
             except tk.TclError:
                 pass
             self._date_picker = None
+        if self._done_past_picker is not None:
+            try:
+                self._done_past_picker.close()
+            except tk.TclError:
+                pass
+            self._done_past_picker = None
         super().destroy()
 
     def _setup_tag_autocomplete(self) -> None:

@@ -116,6 +116,7 @@ class EventsRepository(
     }
 
     suspend fun markDoneLocally(eventId: Int, doneDate: LocalDate = LocalDate.now()) = withContext(Dispatchers.IO) {
+        require(!doneDate.isAfter(LocalDate.now())) { "Completion date cannot be in the future" }
         val entity = eventDao.getEventById(eventId) ?: return@withContext
         val unit = FrequencyUnit.fromApi(entity.frequencyUnit)
         val newDue = addFrequency(doneDate, entity.frequencyValue, unit)
@@ -256,7 +257,7 @@ class EventsRepository(
                 val payload = originalChange.payload?.let(::JSONObject)
                 val doneDate = payload?.optString("done_date")?.takeIf { it.isNotBlank() }?.let(LocalDate::parse)
                 return try {
-                    val updated = apiClient.markDone(token, manualEndpoint, currentEventId)
+                    val updated = apiClient.markDone(token, manualEndpoint, currentEventId, doneDate)
                     persistRemoteEvent(updated)
                     null
                 } catch (ex: ApiException) {
