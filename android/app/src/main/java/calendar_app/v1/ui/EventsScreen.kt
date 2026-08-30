@@ -82,6 +82,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
 import calendar_app.v1.model.FrequencyUnit
+import calendar_app.v1.model.EventHistory
 import calendar_app.v1.model.RecurringEvent
 import calendar_app.v1.model.TimelineHorizons
 import calendar_app.v1.model.addFrequency
@@ -704,14 +705,6 @@ private fun TimelineCanvas(
                 end = Offset(leftPadding + width, midY),
                 strokeWidth = 2f
             )
-            if (!event.details.isNullOrBlank()) {
-                drawCircle(
-                    color = Color(0xFF1A73E8),
-                    radius = 10f,
-                    center = Offset(leftPadding - 20f, rowTop + 20f)
-                )
-            }
-
             event.history.forEach { history ->
                 if (history.actionDate in viewStart..viewEnd) {
                     val hx = dateToX(history.actionDate)
@@ -1010,9 +1003,107 @@ private fun EventDetailsDialog(
                 val tagLabel = event.tag?.takeIf { it.isNotBlank() } ?: "No tag"
                 Text("Tag: $tagLabel")
                 Text(detailsText)
+                CompletionStatistics(event.history)
             }
         }
     )
+}
+
+@Composable
+private fun CompletionStatistics(history: List<EventHistory>) {
+    val completions = remember(history) {
+        history.filter { it.action == "done" }.sortedWith(
+            compareBy<EventHistory> { it.actionDate }.thenBy { it.id }
+        )
+    }
+    Text("Completion statistics", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+    if (completions.isEmpty()) {
+        Text("No completions recorded yet.", color = Color.Gray)
+        return
+    }
+
+    Text("Earliest: ${formatDisplayDate(completions.first().actionDate)}")
+    Text("Latest: ${formatDisplayDate(completions.last().actionDate)}")
+    Text("Made: ${completions.size} time(s)")
+    if (completions.size < 2) {
+        Text("Average interval: n/a")
+        Text("Complete this event one more time to see the gap distribution.", color = Color.Gray)
+        return
+    }
+
+    val intervals = remember(completions) {
+        completions.zipWithNext { previous, current ->
+            ChronoUnit.DAYS.between(previous.actionDate, current.actionDate).toInt()
+        }
+    }
+    Text("Average interval: ${"%.1f".format(intervals.average())} days")
+    CompletionIntervalHistogram(intervals)
+}
+
+@Composable
+private fun CompletionIntervalHistogram(intervals: List<Int>) {
+    val bins = remember(intervals) {
+        val smallest = intervals.minOrNull() ?: 0
+        val largest = intervals.maxOrNull() ?: 0
+        val binCount = minOf(4, maxOf(1, intervals.toSet().size))
+        val binWidth = maxOf(1, (largest - smallest + 1 + binCount - 1) / binCount)
+        val counts = MutableList(binCount) { 0 }
+        intervals.forEach { interval ->
+            val index = ((interval - smallest) / binWidth).coerceIn(0, binCount - 1)
+            counts[index]++
+        }
+        counts.mapIndexed { index, count ->
+            val start = smallest + index * binWidth
+            Triple(start, minOf(largest, start + binWidth - 1), count)
+        }.filter { (start, _, _) -> start <= largest }
+    }
+    val maxCount = bins.maxOf { it.third }.coerceAtLeast(1)
+    Text("Distribution of days between completions", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 4.dp))
+    Canvas(modifier = Modifier.fillMaxWidth().height(180.dp)) {
+        val left = 42.dp.toPx()
+        val right = 12.dp.toPx()
+        val top = 24.dp.toPx()
+        val bottom = 42.dp.toPx()
+        val chartLeft = left
+        val chartRight = size.width - right
+        val chartTop = top
+        val chartBottom = size.height - bottom
+        val labelPaint = android.graphics.Paint().apply {
+            color = android.graphics.Color.DKGRAY
+            textSize = 10.sp.toPx()
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+        val countPaint = android.graphics.Paint(labelPaint).apply {
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+        }
+        drawRect(color = Color(0xFF718096), topLeft = Offset(chartLeft, chartTop), size = androidx.compose.ui.geometry.Size(chartRight - chartLeft, 1f))
+        drawRect(color = Color(0xFF718096), topLeft = Offset(chartLeft, chartBottom), size = androidx.compose.ui.geometry.Size(chartRight - chartLeft, 1f))
+        drawContext.canvas.nativeCanvas.drawText("Intervals", chartLeft, 12.dp.toPx(), labelPaint)
+        drawContext.canvas.nativeCanvas.drawText(maxCount.toString(), chartLeft - 8.dp.toPx(), chartTop + 4.dp.toPx(), labelPaint)
+        drawContext.canvas.nativeCanvas.drawText("0", chartLeft - 8.dp.toPx(), chartBottom + 4.dp.toPx(), labelPaint)
+
+        val slotWidth = (chartRight - chartLeft) / bins.size
+        bins.forEachIndexed { index, (start, end, count) ->
+            val x1 = chartLeft + index * slotWidth + 4.dp.toPx()
+            val x2 = chartLeft + (index + 1) * slotWidth - 4.dp.toPx()
+            val y1 = chartBottom - count.toFloat() / maxCount * (chartBottom - chartTop)
+            drawRect(
+                color = Color(0xFF1A73E8),
+                topLeft = Offset(x1, y1),
+                size = androidx.compose.ui.geometry.Size(x2 - x1, chartBottom - y1)
+            )
+            val center = (x1 + x2) / 2f
+            drawContext.canvas.nativeCanvas.drawText(count.toString(), center, y1 - 5.dp.toPx(), countPaint)
+            val label = if (start == end) "${start}d" else "${start}-${end}d"
+            drawContext.canvas.nativeCanvas.drawText(label, center, chartBottom + 16.dp.toPx(), labelPaint)
+        }
+        drawContext.canvas.nativeCanvas.drawText(
+            "Days between consecutive completions",
+            (chartLeft + chartRight) / 2f,
+            size.height - 6.dp.toPx(),
+            labelPaint
+        )
+    }
 }
 
 @Composable

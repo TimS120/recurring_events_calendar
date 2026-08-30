@@ -74,4 +74,5 @@ val TimelineHorizons: List<TimelineHorizon> = listOf(
     )
 )
 
-const val DEFAULT_HISTORY_LIMIT = 12
+// Statistics need the full available completion history. The API caps this at 365 records per event.
+const val DEFAULT_HISTORY_LIMIT = 365

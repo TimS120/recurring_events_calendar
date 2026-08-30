@@ -23,7 +23,7 @@ Jetpack Compose client that mirrors the PC timeline UI but keeps the PC FastAPI 
 
 - Discovery uses NsdManager to look for _recurringevents._tcp. When a manual host is supplied the resolver skips discovery and hits http://host:port/api/... directly.
 - Every request attaches the bearer token; failures are surfaced as dismissible banners.
-- The app does not cache data locally?after every change it re-runs GET /api/events?history_limit=12, so the PC remains the canonical store.
+- The app stores a local sync snapshot and, after every change, re-runs GET /api/events?history_limit=365 so per-event completion statistics can use the available history while the PC remains the canonical store.
 
 ### Manual test flow
 

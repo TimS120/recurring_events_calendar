@@ -72,6 +72,9 @@ def _row_to_history(row: sqlite3.Row) -> HistoryRecord:
         action=row["action"],
         action_date=_parse_required_date(row["action_date"]),
         note=row["note"],
+        scheduled_due_date=_parse_date(row["scheduled_due_date"])
+        if "scheduled_due_date" in row.keys()
+        else None,
     )
 
 
@@ -102,6 +105,7 @@ def initialize_database(db_path: Path = DEFAULT_DB_PATH) -> None:
                 action TEXT NOT NULL,
                 action_date TEXT NOT NULL,
                 note TEXT,
+                scheduled_due_date TEXT,
                 FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
             );
 
@@ -114,6 +118,9 @@ def initialize_database(db_path: Path = DEFAULT_DB_PATH) -> None:
             conn.execute("ALTER TABLE events ADD COLUMN tag TEXT")
         if "details" not in columns:
             conn.execute("ALTER TABLE events ADD COLUMN details TEXT")
+        history_columns = {row["name"] for row in conn.execute("PRAGMA table_info(event_history)")}
+        if "scheduled_due_date" not in history_columns:
+            conn.execute("ALTER TABLE event_history ADD COLUMN scheduled_due_date TEXT")
         conn.commit()
 
 
@@ -303,7 +310,7 @@ def record_history(
         conn.commit()
         row = conn.execute(
             """
-            SELECT id, event_id, action, action_date, note
+            SELECT id, event_id, action, action_date, note, scheduled_due_date
             FROM event_history
             WHERE id = ?
             """,
@@ -344,10 +351,10 @@ def mark_event_done(
         )
         conn.execute(
             """
-            INSERT INTO event_history (event_id, action, action_date)
-            VALUES (?, 'done', ?)
+            INSERT INTO event_history (event_id, action, action_date, scheduled_due_date)
+            VALUES (?, 'done', ?, ?)
             """,
-            (event_id, done.strftime(DATE_FMT)),
+            (event_id, done.strftime(DATE_FMT), event.due_date.strftime(DATE_FMT)),
         )
         conn.commit()
     updated = get_event(event_id, db_path)
@@ -367,7 +374,7 @@ def _fetch_history_for_event_ids(
     with _db_lock, _connect(db_path) as conn:
         rows = conn.execute(
             f"""
-            SELECT id, event_id, action, action_date, note
+            SELECT id, event_id, action, action_date, note, scheduled_due_date
             FROM event_history
             WHERE event_id IN ({placeholders})
             ORDER BY event_id ASC, action_date DESC
@@ -400,7 +407,7 @@ def list_event_history(
     db_path: Path = DEFAULT_DB_PATH,
 ) -> List[HistoryRecord]:
     query = """
-        SELECT id, event_id, action, action_date, note
+        SELECT id, event_id, action, action_date, note, scheduled_due_date
         FROM event_history
         WHERE event_id = ?
         ORDER BY action_date DESC

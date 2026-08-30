@@ -12,6 +12,7 @@ from data import (
     create_event,
     delete_event,
     initialize_database,
+    list_event_history,
     list_events_with_history,
     mark_event_done,
     update_event,
@@ -486,6 +487,7 @@ class RecurringEventsUI:
         if data is None:
             return
         event, history = data
+        history = self._history_for_details(event_id, history)
         window = self._detail_windows.get(event_id)
         if window and window.winfo_exists():
             window.update_content(event, history)
@@ -526,8 +528,17 @@ class RecurringEventsUI:
                 self._close_detail_window(event_id)
                 continue
             event, history = current[event_id]
+            history = self._history_for_details(event_id, history)
             window.update_content(event, history)
             window.apply_theme(self.current_theme())
+
+    @staticmethod
+    def _history_for_details(event_id: int, fallback: List[HistoryRecord]) -> List[HistoryRecord]:
+        """Load the complete completion history used by the per-event statistics."""
+        try:
+            return list_event_history(event_id)
+        except Exception:  # Keep event details usable if only the summary history is available.
+            return fallback
 
     def reset_timeline_slider(self) -> None:
         self.timeline_offset_var.set(0)

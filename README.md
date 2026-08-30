@@ -31,7 +31,7 @@ The frequency in which the event occures can be set by choosing a frequency valu
   <img src="./readme_utils/android_events_view_2.jpg" alt="img1" width="45%">
 </p>
 
-Here can the events be inspected since when they are overdue or next to make. If an event has additional information provided, it is indicated by the info-icond and a blue dot on the timeline-line.
+Here can the events be inspected since when they are overdue or next to make. If an event has additional information provided, it is indicated by the info icon.
 
 By tag-priorization ("All tags" > Select the tag you want), the selected tag will be shown at the top, other events will only follow after all the events with the selected tag.
 

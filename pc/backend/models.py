@@ -48,6 +48,7 @@ class EventHistoryResponse(BaseModel):
     action: str
     action_date: date
     note: Optional[str]
+    scheduled_due_date: Optional[date]
 
 
 class EventResponse(BaseModel):
@@ -81,6 +82,7 @@ def history_to_response(record: HistoryRecord) -> EventHistoryResponse:
         action=record.action,
         action_date=record.action_date,
         note=record.note,
+        scheduled_due_date=record.scheduled_due_date,
     )
 
 

@@ -304,16 +304,6 @@ class TimelineCanvas(tk.Canvas):
             bg_color = theme.timeline_row_overdue if event.is_overdue() else theme.timeline_row_default
             self.create_rectangle(margin, row_top, width - margin, row_bottom, fill=bg_color, outline="")
             self.create_line(margin, row_mid, width - margin, row_mid, fill=theme.timeline_line)
-            if (event.details or "").strip():
-                self.create_oval(
-                    margin - 35,
-                    row_top + 8,
-                    margin - 15,
-                    row_top + 28,
-                    fill=theme.due_upcoming,
-                    outline="",
-                )
-
             for entry in history:
                 if not (self.view_start <= entry.action_date <= self.view_end):
                     continue

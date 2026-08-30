@@ -40,3 +40,6 @@ class HistoryRecord:
     action: str
     action_date: date
     note: Optional[str]
+    # The due date in effect when the action was recorded.  This is optional so
+    # history created before this field was introduced remains readable.
+    scheduled_due_date: Optional[date] = None

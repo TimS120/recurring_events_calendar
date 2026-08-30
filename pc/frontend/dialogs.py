@@ -439,6 +439,103 @@ class EventDialog(simpledialog.Dialog):
             pass
 
 
+class CompletionStatisticsCanvas(tk.Canvas):
+    """A compact histogram of gaps between consecutive completions."""
+
+    _width = 620
+    _height = 190
+
+    def __init__(self, master: tk.Widget) -> None:
+        super().__init__(master, height=self._height, highlightthickness=0)
+        self._history: List[HistoryRecord] = []
+        self._palette: Optional[ThemePalette] = None
+        self.bind("<Configure>", lambda _event: self.redraw())
+
+    def update_history(self, history: Sequence[HistoryRecord]) -> None:
+        self._history = [entry for entry in history if entry.action == "done"]
+        self.redraw()
+
+    def apply_theme(self, palette: Optional[ThemePalette]) -> None:
+        self._palette = palette
+        self.redraw()
+
+    def redraw(self) -> None:
+        self.delete("all")
+        palette = self._palette or LIGHT_THEME
+        self.configure(background=palette.surface)
+        width = max(self.winfo_width(), self._width)
+        height = self._height
+        if not self._history:
+            self.create_text(
+                width / 2, height / 2, text="Complete this event to start its statistics.",
+                fill=palette.placeholder_text, font=("Segoe UI", 10)
+            )
+            return
+
+        entries = sorted(self._history, key=lambda item: (item.action_date, item.id))
+        if len(entries) < 2:
+            self.create_text(
+                width / 2,
+                height / 2,
+                text="Complete this event one more time to see the gap distribution.",
+                fill=palette.placeholder_text,
+                font=("Segoe UI", 10),
+            )
+            return
+
+        intervals = [
+            (current.action_date - previous.action_date).days
+            for previous, current in zip(entries, entries[1:])
+        ]
+        smallest, largest = min(intervals), max(intervals)
+        bin_count = min(8, max(1, len(set(intervals))))
+        bin_width = max(1, (largest - smallest + 1 + bin_count - 1) // bin_count)
+        bins: List[tuple[int, int, int]] = []
+        for index in range(bin_count):
+            start = smallest + index * bin_width
+            end = min(largest, start + bin_width - 1)
+            if start > largest:
+                break
+            bins.append((start, end, 0))
+        for interval in intervals:
+            index = min((interval - smallest) // bin_width, len(bins) - 1)
+            start, end, count = bins[index]
+            bins[index] = (start, end, count + 1)
+
+        left, right, top, bottom = 52, 18, 26, 46
+        chart_left, chart_right = left, width - right
+        chart_top, chart_bottom = top, height - bottom
+        max_count = max(count for _start, _end, count in bins)
+        self.create_rectangle(chart_left, chart_top, chart_right, chart_bottom, outline=palette.timeline_axis)
+        self.create_text(
+            chart_left,
+            8,
+            text="Number of intervals",
+            anchor="w",
+            fill=palette.text_secondary,
+            font=("Segoe UI", 8, "bold"),
+        )
+        self.create_text(chart_left - 6, chart_top, text=str(max_count), anchor="e", fill=palette.text_secondary, font=("Segoe UI", 8))
+        self.create_text(chart_left - 6, chart_bottom, text="0", anchor="e", fill=palette.text_secondary, font=("Segoe UI", 8))
+
+        slot_width = (chart_right - chart_left) / len(bins)
+        for index, (start, end, count) in enumerate(bins):
+            x1 = chart_left + index * slot_width + 5
+            x2 = chart_left + (index + 1) * slot_width - 5
+            y1 = chart_bottom - (count / max_count) * (chart_bottom - chart_top)
+            self.create_rectangle(x1, y1, x2, chart_bottom, fill=palette.due_upcoming, outline="")
+            self.create_text((x1 + x2) / 2, y1 - 8, text=str(count), fill=palette.text_primary, font=("Segoe UI", 8, "bold"))
+            label = f"{start}d" if start == end else f"{start}-{end}d"
+            self.create_text((x1 + x2) / 2, chart_bottom + 12, text=label, fill=palette.text_secondary, font=("Segoe UI", 8))
+        self.create_text(
+            (chart_left + chart_right) / 2,
+            height - 9,
+            text="Days between consecutive completions",
+            fill=palette.text_secondary,
+            font=("Segoe UI", 8),
+        )
+
+
 class EventDetailsWindow(tk.Toplevel):
     def __init__(
         self,
@@ -514,8 +611,16 @@ class EventDetailsWindow(tk.Toplevel):
         scrollbar.grid(row=0, column=1, sticky="ns")
         self._details_text.configure(yscrollcommand=scrollbar.set)
 
+        ttk.Label(self._container, text="Completion statistics").grid(
+            row=4, column=0, sticky="w", pady=(12, 4)
+        )
+        self._statistics_summary = tk.Label(self._container, anchor="w", justify="left")
+        self._statistics_summary.grid(row=5, column=0, sticky="we", pady=(0, 4))
+        self._statistics_canvas = CompletionStatisticsCanvas(self._container)
+        self._statistics_canvas.grid(row=6, column=0, sticky="we")
+
         button_frame = ttk.Frame(self._container)
-        button_frame.grid(row=4, column=0, sticky="e", pady=(12, 0))
+        button_frame.grid(row=7, column=0, sticky="e", pady=(12, 0))
         ttk.Button(button_frame, text="Edit event", command=self._handle_edit).pack(side="left", padx=(0, 6))
         ttk.Button(button_frame, text="Close", command=self._handle_close).pack(side="left")
 
@@ -546,6 +651,26 @@ class EventDetailsWindow(tk.Toplevel):
         self._details_text.delete("1.0", "end")
         self._details_text.insert("1.0", details_text)
         self._details_text.configure(state="disabled")
+        self._statistics_canvas.update_history(self._history)
+        self._statistics_summary.configure(text=self._completion_summary())
+
+    def _completion_summary(self) -> str:
+        completions = [entry for entry in self._history if entry.action == "done"]
+        if not completions:
+            return "No completions recorded yet."
+        ordered = sorted(completions, key=lambda entry: (entry.action_date, entry.id))
+        summary = (
+            f"Earliest: {format_display_date(ordered[0].action_date)} | "
+            f"Latest: {format_display_date(ordered[-1].action_date)} | "
+            f"Made: {len(ordered)} time(s)"
+        )
+        if len(ordered) < 2:
+            return f"{summary} | Average interval: n/a"
+        intervals = [
+            (current.action_date - previous.action_date).days
+            for previous, current in zip(ordered, ordered[1:])
+        ]
+        return f"{summary} | Average interval: {sum(intervals) / len(intervals):.1f} days"
 
     def apply_theme(self, theme: Optional[ThemePalette] = None) -> None:
         palette = theme or (self._theme_provider() if self._theme_provider else None)
@@ -568,6 +693,7 @@ class EventDetailsWindow(tk.Toplevel):
             self._tag_label,
             self._last_done_label,
             self._history_label,
+            self._statistics_summary,
         ):
             widget.configure(background=background, foreground=text_primary)
         try:
@@ -581,6 +707,7 @@ class EventDetailsWindow(tk.Toplevel):
             )
         except tk.TclError:
             pass
+        self._statistics_canvas.apply_theme(palette)
         self._apply_titlebar_theme()
 
     def _handle_edit(self) -> None:
