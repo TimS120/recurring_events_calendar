@@ -1,17 +1,11 @@
 package calendar_app.v1
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.getValue
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import calendar_app.v1.ui.EventsScreen
@@ -22,10 +16,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-
-        val nearbyPermissionLauncher =
-            registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
-        maybeRequestNearbyPermission(nearbyPermissionLauncher)
 
         setContent {
             val viewModel: EventsViewModel = viewModel()
@@ -45,11 +35,8 @@ class MainActivity : ComponentActivity() {
                     onMarkDueToday = viewModel::markDueToday,
                     onDeleteEvent = viewModel::deleteEvent,
                     onToggleSettings = viewModel::toggleSettings,
-                    onTokenChange = viewModel::updateToken,
-                    onServerUrlChange = viewModel::updateServerUrl,
-                    onManualHostChange = viewModel::updateManualHost,
-                    onManualPortChange = viewModel::updateManualPort,
-                    onApplySettings = viewModel::useSettingsDefaults,
+                    onFirebaseSignIn = viewModel::signIn,
+                    onResetFirebaseCalendar = viewModel::resetFirebaseCalendar,
                     onEditorNameChange = viewModel::updateEditorName,
                     onEditorTagChange = viewModel::updateEditorTag,
                     onEditorDetailsChange = viewModel::updateEditorDetails,
@@ -66,12 +53,4 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun maybeRequestNearbyPermission(launcher: ActivityResultLauncher<String>) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        val permission = Manifest.permission.NEARBY_WIFI_DEVICES
-        val granted = ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
-        if (!granted) {
-            launcher.launch(permission)
-        }
-    }
 }

@@ -59,18 +59,12 @@ The app can be synchronized between pc and smartphone (and vice versa), so that 
 
 ### Running on PC
   1. [One time:] Install dependencies: `pip install -r pc/requirements.txt`
-  2. Start the PC app: `python pc/main.py` (this also starts the local API server on port 8000)
-  3. In the terminal, note the printed bearer token (used by Android)
-  4. Keep the app running while you pair the Android client
-  5. To synchronize the app with the Android app: Run `cloudflared tunnel --url http://localhost:8000` and keep the URL for the Android Server URL field. It is something like this:
-  ![alt text](./readme_utils/pc_cloudflared_tunnel.png)
+  2. Start the PC app: `python pc/main.py`.
+  3. The first time, sign in with your Firebase email/password. If it is a new email, confirm the displayed account-creation prompt. The session is then stored securely in Windows Credential Manager.
+  4. Press **Sync now**. The PC no longer starts a local API server and does not need cloudflared.
 
 
 ### Running on Android
   1. [One time:]Open `android/` in Android Studio and run the app (API 24+).
-  2. [One time:]Put the phone/emulator on the same WLAN as the PC. On Android 13+, grant the Nearby Wi-Fi permission when prompted so mDNS works.
-  3. Tap the gear icon, paste the bearer token, then choose one connection option:
-  - Leave Server URL empty to auto-discover via mDNS.
-  - [One time:] Set Manual host/port to the PC LAN IP and port 8000 if multicast is blocked.
-  - Set Server URL to your tunnel URL (for synchronization)
-  4. Tap Apply > Tap Sync now
+  2. Tap the gear icon and sign in once with the same Firebase email/password as the PC (or create the account on the first device).
+  3. Tap **Sync now**. Both apps can work offline and synchronize when each later has internet access; the PC does not need to be online while the phone changes data.

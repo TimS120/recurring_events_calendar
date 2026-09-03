@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.time.LocalDate
+import calendar_app.v1.data.firebase.FirestoreCalendarStore
+import kotlinx.coroutines.flow.first
 
 class EventsRepository(
     database: RecurringEventsDatabase,
@@ -279,6 +281,51 @@ class EventsRepository(
         eventDao.replaceAll(pairs)
     }
 
+    suspend fun resetFirebaseCalendar(store: FirestoreCalendarStore) = withContext(Dispatchers.IO) {
+        // Cloud first: do not discard this device's data if Firebase is unavailable.
+        store.clearCalendar()
+        eventDao.replaceAll(emptyList())
+        pendingDao.clearAll()
+    }
+
+    /** Synchronize pending local edits without discarding additions from another device. */
+    suspend fun syncFirebase(store: FirestoreCalendarStore): SyncResult = withContext(Dispatchers.IO) {
+        val pending = pendingDao.getPendingChanges()
+        val local = eventsFlow.first()
+        return@withContext try {
+            if (pending.isNotEmpty()) {
+                val localById = local.associateBy { it.id }
+                val remote = store.read()
+                val deletedIds = remote.deletedIds.toMutableSet()
+                val merged = remote.events.associateBy { it.id }.toMutableMap()
+                pending.map { it.eventId }.distinct().forEach { eventId ->
+                    localById[eventId]?.let {
+                        merged[eventId] = it
+                        deletedIds.remove(eventId)
+                    } ?: run {
+                        merged.remove(eventId)
+                        deletedIds.add(eventId)
+                    }
+                }
+                deletedIds.forEach { merged.remove(it) }
+                store.write(merged.values.sortedBy { it.id }, deletedIds)
+                pendingDao.clearAll()
+                SyncResult.FirebaseSuccess(merged.size, pending.size)
+            } else {
+                val remote = store.read()
+                if (remote.exists) {
+                    storeSnapshot(remote.events)
+                    SyncResult.FirebaseSuccess(remote.events.size, 0)
+                } else {
+                    store.write(local)
+                    SyncResult.FirebaseSuccess(local.size, local.size)
+                }
+            }
+        } catch (ex: Exception) {
+            SyncResult.Failure(ex)
+        }
+    }
+
     private suspend fun persistRemoteEvent(event: RecurringEvent) {
         eventDao.upsertEvent(event.toEntity())
         eventDao.deleteHistoryForEvent(event.id)
@@ -328,6 +375,7 @@ class EventsRepository(
         ) : SyncResult
 
         data class Failure(val error: Throwable) : SyncResult
+        data class FirebaseSuccess(val remoteCount: Int, val pushedChanges: Int) : SyncResult
     }
 
     data class PendingApplyResult(val newRemoteId: Int?)

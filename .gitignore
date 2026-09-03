@@ -68,7 +68,21 @@ __marimo__/
 # -------------------------------------------------------------
 # Project-specific data
 # -------------------------------------------------------------
-pc/data_files/
+pc/data_files/*
+!pc/data_files/firebase_config.example.json
+
+# Firebase configuration is machine/account specific. Keep only the committed
+# example file; never commit API keys, service credentials, or user tokens.
+pc/data_files/firebase_config.json
+android/app/google-services.json
+firebase-adminsdk-*.json
+*.firebase-token
+
+# Local Gradle caches/downloads created for builds and troubleshooting.
+android/.gradle-user/
+android/.gradle-verify/
+android/.gradle-windows-trust/
+android/gradle-*-bin.zip
 # -------------------------------------------------------------
 # Android / mobile build artifacts
 # -------------------------------------------------------------

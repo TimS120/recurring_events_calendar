@@ -6,9 +6,10 @@ import androidx.lifecycle.viewModelScope
 import calendar_app.v1.data.EventsRepository
 import calendar_app.v1.data.local.RecurringEventsDatabase
 import calendar_app.v1.data.network.EventsApiClient
-import calendar_app.v1.data.network.MdnsEndpoint
 import calendar_app.v1.data.network.MdnsResolver
 import calendar_app.v1.data.preferences.PreferenceStorage
+import calendar_app.v1.data.firebase.FirebaseAuthManager
+import calendar_app.v1.data.firebase.FirestoreCalendarStore
 import calendar_app.v1.model.DEFAULT_HISTORY_LIMIT
 import calendar_app.v1.model.FrequencyUnit
 import calendar_app.v1.model.RecurringEvent
@@ -22,13 +23,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.time.LocalDate
-import java.net.URI
 
 data class SettingsUiState(
-    val token: String = "",
-    val serverUrl: String = "",
-    val manualHost: String = "",
-    val manualPort: String = "8000"
+    val email: String = "",
+    val isSignedIn: Boolean = false
 )
 
 data class EventEditorState(
@@ -86,14 +84,14 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
     )
     private val database = RecurringEventsDatabase.getInstance(application)
     private val repository = EventsRepository(database, apiClient)
+    private val firebaseAuth = FirebaseAuthManager()
+    private val firestoreStore = FirestoreCalendarStore(firebaseAuth)
 
     private val _uiState = MutableStateFlow(
         EventsScreenState(
             settings = SettingsUiState(
-                token = prefs.token,
-                serverUrl = prefs.serverUrl,
-                manualHost = prefs.manualHost,
-                manualPort = prefs.manualPort.toString()
+                email = prefs.firebaseEmail,
+                isSignedIn = firebaseAuth.isSignedIn
             )
         )
     )
@@ -142,30 +140,10 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update { it.copy(showSettings = show, statusMessage = null, errorMessage = null) }
     }
 
-    fun updateToken(value: String) {
-        prefs.token = value
+    fun updateEmail(value: String) {
+        prefs.firebaseEmail = value
         _uiState.update {
-            it.copy(settings = it.settings.copy(token = value))
-        }
-    }
-
-    fun updateManualHost(value: String) {
-        prefs.manualHost = value
-        _uiState.update {
-            it.copy(settings = it.settings.copy(manualHost = value))
-        }
-    }
-
-    fun updateServerUrl(value: String) {
-        prefs.serverUrl = value
-        _uiState.update {
-            it.copy(settings = it.settings.copy(serverUrl = value))
-        }
-    }
-
-    fun updateManualPort(value: String) {
-        _uiState.update {
-            it.copy(settings = it.settings.copy(manualPort = value))
+            it.copy(settings = it.settings.copy(email = value))
         }
     }
 
@@ -226,23 +204,31 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun syncNow() {
-        val token = uiState.value.settings.token.trim()
-        if (token.isEmpty()) {
-            _uiState.update { it.copy(errorMessage = "Enter the bearer token before syncing.", statusMessage = null) }
+        if (!firebaseAuth.isSignedIn) {
+            _uiState.update { it.copy(errorMessage = "Sign in to Firebase before syncing.", statusMessage = null) }
             return
         }
-        val manualEndpoint = manualEndpointOrNull()
         viewModelScope.launch {
             _uiState.update { it.copy(isSyncing = true, errorMessage = null, statusMessage = "Synchronizing...") }
-            when (val result = repository.sync(token, manualEndpoint, DEFAULT_HISTORY_LIMIT)) {
-                is EventsRepository.SyncResult.Success -> {
-                    val endpointDescription = "${result.endpoint.host}:${result.endpoint.port}"
+            when (val result = repository.syncFirebase(firestoreStore)) {
+                is EventsRepository.SyncResult.FirebaseSuccess -> {
                     val message = "Synced ${result.remoteCount} event(s). Pushed ${result.pushedChanges} change(s)."
                     _uiState.update {
                         it.copy(
                             isSyncing = false,
-                            endpointDescription = endpointDescription,
+                            endpointDescription = "Firebase",
                             statusMessage = message,
+                            errorMessage = null
+                        )
+                    }
+                }
+
+                is EventsRepository.SyncResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            isSyncing = false,
+                            endpointDescription = result.endpoint.host,
+                            statusMessage = "Synced ${result.remoteCount} event(s).",
                             errorMessage = null
                         )
                     }
@@ -254,6 +240,46 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
                     }
                 }
             }
+        }
+    }
+
+    fun signIn(email: String, password: String, create: Boolean) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSyncing = true, errorMessage = null, statusMessage = "Signing in...") }
+            try {
+                if (create) firebaseAuth.createAccount(email, password) else firebaseAuth.signIn(email, password)
+                prefs.firebaseEmail = email
+                _uiState.update { it.copy(isSyncing = false, settings = it.settings.copy(email = email, isSignedIn = true), statusMessage = "Signed in. Syncing...") }
+                syncNow()
+            } catch (ex: Exception) {
+                _uiState.update { it.copy(isSyncing = false, errorMessage = ex.localizedMessage ?: "Firebase sign-in failed.") }
+            }
+        }
+    }
+
+    /** Intentionally destructive reset for a fresh shared calendar. */
+    fun resetFirebaseCalendar() {
+        if (!firebaseAuth.isSignedIn) {
+            _uiState.update { it.copy(errorMessage = "Sign in to Firebase before clearing the calendar.", statusMessage = null) }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSyncing = true, errorMessage = null, statusMessage = "Clearing calendar data...") }
+            try {
+                repository.resetFirebaseCalendar(firestoreStore)
+                _uiState.update {
+                    it.copy(isSyncing = false, statusMessage = "All local and Firebase calendar data was cleared.", errorMessage = null)
+                }
+            } catch (ex: Exception) {
+                _uiState.update {
+                    it.copy(isSyncing = false, errorMessage = ex.humanMessage("Could not clear calendar data."), statusMessage = null)
+                }
+            }
+        }
+        // Firebase Auth restores its saved session during app startup.  Only
+        // trusted, already-signed-in devices synchronize automatically.
+        if (firebaseAuth.isSignedIn) {
+            syncNow()
         }
     }
 
@@ -363,35 +389,6 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun useSettingsDefaults() {
-        val serverUrl = uiState.value.settings.serverUrl.trim()
-        val resolvedPort: Int
-        if (serverUrl.isNotEmpty()) {
-            val endpoint = parseServerUrl(serverUrl) ?: run {
-                _uiState.update { it.copy(errorMessage = "Server URL must be a valid http(s) URL.") }
-                return
-            }
-            prefs.serverUrl = serverUrl
-            prefs.manualPort = endpoint.port
-            resolvedPort = endpoint.port
-        } else {
-            val port = uiState.value.settings.manualPort.trim().ifEmpty { "8000" }.toIntOrNull() ?: run {
-                _uiState.update { it.copy(errorMessage = "Manual port must be numeric.") }
-                return
-            }
-            prefs.serverUrl = ""
-            prefs.manualPort = port
-            resolvedPort = port
-        }
-        _uiState.update {
-            it.copy(
-                settings = it.settings.copy(manualPort = resolvedPort.toString(), serverUrl = serverUrl),
-                showSettings = false,
-                statusMessage = "Settings updated."
-            )
-        }
-    }
-
     fun clearMessages() {
         _uiState.update { it.copy(statusMessage = null, errorMessage = null) }
     }
@@ -413,31 +410,6 @@ class EventsViewModel(application: Application) : AndroidViewModel(application) 
             }
             state.copy(prioritizedTag = allowed)
         }
-    }
-
-    private fun manualEndpointOrNull(): MdnsEndpoint? {
-        val urlEndpoint = serverUrlEndpointOrNull()
-        if (urlEndpoint != null) return urlEndpoint
-        val host = uiState.value.settings.manualHost.trim()
-        if (host.isEmpty()) return null
-        val port = uiState.value.settings.manualPort.trim().ifEmpty { "8000" }.toIntOrNull() ?: return null
-        return MdnsEndpoint(scheme = "http", host = host, port = port, path = "/api")
-    }
-
-    private fun serverUrlEndpointOrNull(): MdnsEndpoint? {
-        val raw = uiState.value.settings.serverUrl.trim()
-        if (raw.isEmpty()) return null
-        return parseServerUrl(raw)
-    }
-
-    private fun parseServerUrl(raw: String): MdnsEndpoint? {
-        val uri = runCatching { URI(raw) }.getOrNull() ?: return null
-        val scheme = uri.scheme?.lowercase() ?: return null
-        if (scheme != "http" && scheme != "https") return null
-        val host = uri.host ?: return null
-        val port = if (uri.port != -1) uri.port else if (scheme == "https") 443 else 80
-        val path = uri.path?.takeIf { it.isNotBlank() && it != "/" } ?: "/api"
-        return MdnsEndpoint(scheme = scheme, host = host, port = port, path = path)
     }
 
     private fun Throwable.humanMessage(fallback: String): String {

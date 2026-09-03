@@ -113,11 +113,8 @@ fun EventsScreen(
     onMarkDueToday: (Int) -> Unit,
     onDeleteEvent: (Int) -> Unit,
     onToggleSettings: (Boolean) -> Unit,
-    onTokenChange: (String) -> Unit,
-    onServerUrlChange: (String) -> Unit,
-    onManualHostChange: (String) -> Unit,
-    onManualPortChange: (String) -> Unit,
-    onApplySettings: () -> Unit,
+    onFirebaseSignIn: (String, String, Boolean) -> Unit,
+    onResetFirebaseCalendar: () -> Unit,
     onEditorNameChange: (String) -> Unit,
     onEditorTagChange: (String) -> Unit,
     onEditorDetailsChange: (String) -> Unit,
@@ -138,14 +135,8 @@ fun EventsScreen(
         ) {
             SettingsSheet(
                 state = state,
-                onTokenChange = onTokenChange,
-                onServerUrlChange = onServerUrlChange,
-                onHostChange = onManualHostChange,
-                onPortChange = onManualPortChange,
-                onApply = {
-                    onApplySettings()
-                    onToggleSettings(false)
-                }
+                onFirebaseSignIn = onFirebaseSignIn,
+                onResetFirebaseCalendar = onResetFirebaseCalendar
             )
         }
     }
@@ -762,45 +753,26 @@ private fun TimelineCanvas(
 @Composable
 private fun SettingsSheet(
     state: EventsScreenState,
-    onTokenChange: (String) -> Unit,
-    onServerUrlChange: (String) -> Unit,
-    onHostChange: (String) -> Unit,
-    onPortChange: (String) -> Unit,
-    onApply: () -> Unit
+    onFirebaseSignIn: (String, String, Boolean) -> Unit,
+    onResetFirebaseCalendar: () -> Unit
 ) {
+    var email by remember { mutableStateOf(state.settings.email) }
+    var password by remember { mutableStateOf("") }
     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Connection Settings", style = MaterialTheme.typography.titleMedium)
-        OutlinedTextField(
-            value = state.settings.token,
-            onValueChange = onTokenChange,
-            label = { Text("Bearer token") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = state.settings.serverUrl,
-            onValueChange = onServerUrlChange,
-            label = { Text("Server URL (optional)") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = state.settings.manualHost,
-            onValueChange = onHostChange,
-            label = { Text("Manual host (optional)") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = state.settings.manualPort,
-            onValueChange = onPortChange,
-            label = { Text("Port") },
-            modifier = Modifier.fillMaxWidth()
-        )
-        Text(
-            "If Server URL is set, manual host/port are ignored. Leave host empty to auto-discover `_recurringevents._tcp`.",
-            style = MaterialTheme.typography.bodySmall
-        )
-        Button(onClick = onApply, modifier = Modifier.align(Alignment.End)) {
-            Text("Apply")
+        Text("Firebase synchronization", style = MaterialTheme.typography.titleMedium)
+        OutlinedTextField(value = email, onValueChange = { email = it }, label = { Text("Email") }, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Password") }, modifier = Modifier.fillMaxWidth())
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { onFirebaseSignIn(email, password, false) }, enabled = email.isNotBlank() && password.isNotBlank()) { Text("Sign in") }
+            TextButton(onClick = { onFirebaseSignIn(email, password, true) }, enabled = email.isNotBlank() && password.isNotBlank()) { Text("Create account") }
         }
+        Text(if (state.settings.isSignedIn) "This device is signed in and stays trusted." else "Sign in once to trust this device.", style = MaterialTheme.typography.bodySmall)
+        if (state.settings.isSignedIn) {
+            TextButton(onClick = onResetFirebaseCalendar) {
+                Text("Clear all local and Firebase calendar data")
+            }
+        }
+        Text("No tunnel, local server URL, or bearer token is required.", style = MaterialTheme.typography.bodySmall)
     }
 }
 

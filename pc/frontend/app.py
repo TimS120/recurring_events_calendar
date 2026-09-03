@@ -29,7 +29,9 @@ from .constants import (
     VISIBLE_ROWS,
 )
 from .dialogs import EventDetailsWindow, EventDialog
-from .server_controller import EmbeddedServerController
+from firebase_auth import FirebaseSession, load_config
+from firestore_store import FirestoreStore
+from firebase_calendar import export_local_calendar, import_cloud_calendar, merge_calendars
 from .theme import (
     DARK_THEME,
     HORIZON_SETTINGS,
@@ -44,7 +46,8 @@ from .widgets.event_canvases import EventListCanvas, TimelineCanvas
 class RecurringEventsUI:
     def __init__(self) -> None:
         initialize_database()
-        self.server_controller = EmbeddedServerController()
+        self.firebase_session = FirebaseSession(load_config())
+        self.firestore_store = FirestoreStore(self.firebase_session)
         self.root = tk.Tk()
         self.root.title("Recurring Events Calendar")
         self.root.geometry("1200x720")
@@ -63,7 +66,7 @@ class RecurringEventsUI:
         self.scroll_var = tk.DoubleVar(value=0.0)
         self.scroll_offset = 0.0
         self.tag_priority_var = tk.StringVar(value=TAG_PRIORITY_ALL)
-        self.status_var = tk.StringVar(value="Starting server...")
+        self.status_var = tk.StringVar(value="Connecting to Firebase...")
         self._suppress_scroll_callback = False
 
         self.events: List[Tuple[EventRecord, List[HistoryRecord]]] = []
@@ -75,7 +78,7 @@ class RecurringEventsUI:
         self._build_layout()
         self.apply_theme()
         self._bind_scroll_events()
-        self._start_server_and_sync()
+        self._start_firebase_and_sync()
 
     @property
     def theme_mode(self) -> str:
@@ -179,7 +182,8 @@ class RecurringEventsUI:
         controls.pack(fill="x", padx=12, pady=(12, 6))
 
         ttk.Button(controls, text="New Event", command=self.add_event).pack(side="left")
-        ttk.Button(controls, text="Sync now", command=self.refresh_events).pack(side="right")
+        ttk.Button(controls, text="Firebase account…", command=self.configure_firebase_account).pack(side="left", padx=(8, 0))
+        ttk.Button(controls, text="Sync now", command=self.sync_firebase).pack(side="right")
         self.theme_toggle_btn = ttk.Button(controls, text=self._theme_button_text(), command=self.toggle_theme)
         self.theme_toggle_btn.pack(side="right", padx=(0, 8))
 
@@ -312,26 +316,75 @@ class RecurringEventsUI:
         self.root.bind_all("<Button-4>", lambda event: self._on_mouse_wheel(event, delta_override=120))
         self.root.bind_all("<Button-5>", lambda event: self._on_mouse_wheel(event, delta_override=-120))
 
-    def _start_server_and_sync(self) -> None:
-        self.status_var.set("Starting local API server...")
-        self.root.update_idletasks()
-        try:
-            self.server_controller.start()
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("Server start failed", f"Could not start the local API server:\n{exc}")
-            self.status_var.set("Server unavailable - showing last known data")
+    def _start_firebase_and_sync(self) -> None:
+        if not self.firebase_session.restore() and not self.configure_firebase_account():
+            self.status_var.set("Not signed in - local calendar only")
             self.refresh_events()
             return
-        self.status_var.set("Server online - syncing events")
-        self.refresh_events()
+        self.sync_firebase()
+
+    def configure_firebase_account(self) -> bool:
+        """Sign in once, or create the app-specific Firebase account on demand."""
+        from tkinter import simpledialog
+        email = simpledialog.askstring("Firebase sign in", "Email:", parent=self.root)
+        password = simpledialog.askstring("Firebase sign in", "Password:", parent=self.root, show="*") if email else None
+        if not email or not password:
+            return False
+        try:
+            self.firebase_session.sign_in(email, password)
+        except Exception as exc:  # noqa: BLE001
+            choice = messagebox.askyesnocancel(
+                "Firebase account",
+                "Sign-in failed.\n\n"
+                "Yes: create a new calendar account with this email.\n"
+                "No: send a password-reset email for the existing calendar account.\n"
+                "Cancel: make no change.",
+            )
+            if choice is None:
+                return False
+            if choice is False:
+                return self.reset_firebase_password(email)
+            try:
+                self.firebase_session.create_account(email, password)
+            except Exception as create_exc:  # noqa: BLE001
+                messagebox.showerror("Firebase account creation failed", str(create_exc))
+                return False
+        self.status_var.set("Firebase account connected. Press Sync now to synchronize.")
+        return True
+
+    def reset_firebase_password(self, email: str) -> bool:
+        """Send the account owner Firebase's password-reset email."""
+        try:
+            self.firebase_session.send_password_reset(email)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Password reset failed", str(exc))
+            return False
+        messagebox.showinfo(
+            "Password reset email sent",
+            "Firebase sent a password-reset link. Open the email, choose a new calendar password, then use Firebase account… to sign in.",
+        )
+        return False
 
     def _handle_close_request(self) -> None:
         for event_id in list(self._detail_windows.keys()):
             self._close_detail_window(event_id)
+        self.root.destroy()
+
+    def sync_firebase(self) -> None:
         try:
-            self.server_controller.stop()
-        finally:
-            self.root.destroy()
+            remote = self.firestore_store.read_calendar()
+            local = export_local_calendar()
+            if remote is None:
+                merged = local
+            else:
+                merged = merge_calendars(remote, local)
+            self.firestore_store.write_calendar(merged)
+            import_cloud_calendar(merged)
+            self.status_var.set("Merged calendar with Firebase")
+            self.refresh_events()
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Firebase sync failed", str(exc))
+            self.refresh_events()
 
     def _handle_list_viewport_change(self, height: int) -> None:
         if height <= 0:
@@ -373,7 +426,18 @@ class RecurringEventsUI:
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Error", f"Could not create event: {exc}")
             return
+        self._upload_firebase()
         self.refresh_events()
+
+    def _upload_firebase(self) -> None:
+        if not self.firebase_session.is_signed_in:
+            return
+        try:
+            local = export_local_calendar()
+            remote = self.firestore_store.read_calendar()
+            self.firestore_store.write_calendar(local if remote is None else merge_calendars(remote, local))
+        except Exception as exc:  # noqa: BLE001
+            self.status_var.set(f"Saved locally; Firebase upload failed: {exc}")
 
     def refresh_events(self) -> None:
         try:
@@ -453,6 +517,15 @@ class RecurringEventsUI:
                 except Exception as exc:  # noqa: BLE001
                     messagebox.showerror("Error", f"Failed to delete event: {exc}")
                     return
+                # Publish the deletion directly. A merge would keep the old
+                # remote copy and make the event return on the next sync.
+                if self.firebase_session.is_signed_in:
+                    calendar = export_local_calendar()
+                    remote = self.firestore_store.read_calendar() or {}
+                    calendar["deletedIds"] = sorted({
+                        *[int(value) for value in remote.get("deletedIds", [])], event.id
+                    })
+                    self.firestore_store.write_calendar(calendar)
                 self.refresh_events()
                 return
             if dialog.result.get(DUE_TODAY_SENTINEL_KEY):
@@ -461,6 +534,7 @@ class RecurringEventsUI:
                 except Exception as exc:  # noqa: BLE001
                     messagebox.showerror("Error", f"Failed to update due date: {exc}")
                     return
+                self._upload_firebase()
                 self.refresh_events()
                 return
             if dialog.result.get(MARK_DONE_SENTINEL_KEY):
@@ -480,6 +554,7 @@ class RecurringEventsUI:
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Error", f"Failed to update event: {exc}")
             return
+        self._upload_firebase()
         self.refresh_events()
 
     def _show_event_details(self, event_id: int) -> None:
@@ -582,6 +657,7 @@ class RecurringEventsUI:
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Error", f"Failed to mark as done: {exc}")
             return
+        self._upload_firebase()
         self.refresh_events()
 
     def run(self) -> None:

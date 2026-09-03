@@ -22,4 +22,7 @@ interface PendingChangeDao {
 
     @Query("DELETE FROM pending_changes WHERE eventId = :eventId AND changeType = :type")
     suspend fun deleteByEventAndType(eventId: Int, type: PendingChangeType)
+
+    @Query("DELETE FROM pending_changes")
+    suspend fun clearAll()
 }

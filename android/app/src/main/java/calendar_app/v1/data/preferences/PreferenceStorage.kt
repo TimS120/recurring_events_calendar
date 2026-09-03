@@ -13,6 +13,10 @@ class PreferenceStorage(context: Context) {
             prefs.edit().putString(KEY_TOKEN, value.trim()).apply()
         }
 
+    var firebaseEmail: String
+        get() = prefs.getString(KEY_FIREBASE_EMAIL, "") ?: ""
+        set(value) { prefs.edit().putString(KEY_FIREBASE_EMAIL, value.trim()).apply() }
+
     val sourceId: String
         get() {
             val existing = prefs.getString(KEY_SOURCE_ID, null)
@@ -53,6 +57,7 @@ class PreferenceStorage(context: Context) {
 
     companion object {
         private const val KEY_TOKEN = "token"
+        private const val KEY_FIREBASE_EMAIL = "firebase_email"
         private const val KEY_SOURCE_ID = "source_id"
         private const val KEY_MANUAL_HOST = "manual_host"
         private const val KEY_SERVER_URL = "server_url"
